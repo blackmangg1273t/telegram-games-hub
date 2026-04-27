@@ -1,0 +1,48 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  --tg-bg: #0f172a;
+  --tg-accent: #6366f1;
+}
+
+* { box-sizing: border-box; }
+
+body {
+  background: var(--tg-bg);
+  font-family: 'Segoe UI', system-ui, sans-serif;
+}
+
+.game-card {
+  transition: transform 0.2s, box-shadow 0.2s;
+}
+.game-card:active {
+  transform: scale(0.96);
+}
+
+.pulse-ring {
+  animation: pulse-ring 1.5s ease-out infinite;
+}
+@keyframes pulse-ring {
+  0% { transform: scale(0.8); opacity: 1; }
+  100% { transform: scale(2); opacity: 0; }
+}
+
+.slide-up {
+  animation: slide-up 0.4s ease-out;
+}
+@keyframes slide-up {
+  from { transform: translateY(30px); opacity: 0; }
+  to { transform: translateY(0); opacity: 1; }
+}
+
+.bounce-in {
+  animation: bounce-in 0.5s cubic-bezier(0.36, 0.07, 0.19, 0.97);
+}
+@keyframes bounce-in {
+  0% { transform: scale(0.3); opacity: 0; }
+  50% { transform: scale(1.05); }
+  70% { transform: scale(0.9); }
+  100% { transform: scale(1); opacity: 1; }
+}
