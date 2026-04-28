@@ -31,11 +31,11 @@ export default function RoomPage() {
   const [room, setRoom] = useState<Room | null>(null)
   const [members, setMembers] = useState<Member[]>([])
   const [loading, setLoading] = useState(true)
-  const [currentQuestion, setCurrentQuestion] = useState<{name:string;hint:string;emoji:string} | null>(null)
+  const [currentQuestion, setCurrentQuestion] = useState<{name:string;hint:string;image?:string} | null>(null)
   const [answer, setAnswer] = useState('')
   const [roundResult, setRoundResult] = useState<string | null>(null)
   const [timeLeft, setTimeLeft] = useState(15)
-  const [questions, setQuestions] = useState<Array<{name:string;hint:string;emoji:string}>>([])
+  const [questions, setQuestions] = useState<Array<{name:string;hint:string;image?:string}>>([])
   const [scores, setScores] = useState<Record<number, number>>({})
   const [answered, setAnswered] = useState(false)
   const [showInvite, setShowInvite] = useState(false)
@@ -214,7 +214,9 @@ export default function RoomPage() {
         {currentQuestion && (
           <div className="flex-1 flex flex-col items-center justify-center">
             <div className="bg-white/10 rounded-3xl p-10 mb-6 text-center">
-              <div className="text-8xl mb-4">{currentQuestion.emoji}</div>
+              <div style={{background:'white', borderRadius:20, padding:24, width:200, height:200, display:'flex', alignItems:'center', justifyContent:'center', margin: '0 auto 16px'}}>
+                <img src={currentQuestion.image} alt="?" style={{maxWidth:160, maxHeight:160, objectFit:'contain'}} />
+              </div>
               <div className="text-gray-400 text-sm">تلميح: {currentQuestion.hint}</div>
             </div>
 
