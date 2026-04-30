@@ -136,12 +136,13 @@ export const PHONE_LOGOS: Question[] = [
 ]
 
 export const GAME_TYPES = [
-  { id: 'logo_guess', name: 'تخمين اللوجو', emoji: '🎯', description: 'خمّن الماركة من لوجوها', color: 'from-purple-600 to-pink-600', maxPlayers: 8 },
-  { id: 'car_logo', name: 'لوجو السيارات', emoji: '🚗', description: 'من يعرف اللوجوهات أكثر؟', color: 'from-blue-600 to-cyan-600', maxPlayers: 8 },
-  { id: 'brand_logo', name: 'ماركات عالمية', emoji: '🌍', description: 'تحدي الماركات العالمية', color: 'from-orange-600 to-red-600', maxPlayers: 8 },
-  { id: 'phone_guess', name: 'خمّن الهاتف', emoji: '📱', description: 'شركات الهواتف الكبرى', color: 'from-green-600 to-teal-600', maxPlayers: 8 },
-  { id: 'tic_tac_toe', name: 'إكس أو', emoji: '⭕', description: 'الكلاسيكية الخالدة', color: 'from-yellow-600 to-orange-600', maxPlayers: 2 },
-  { id: 'snake', name: 'الثعبان', emoji: '🐍', description: 'كُل وكبر وتفوق', color: 'from-emerald-600 to-green-600', maxPlayers: 1 },
+  { id: 'logo_guess', name: 'تخمين اللوجو', emoji: '🎯', description: 'خمّن الماركة من لوجوها', color: 'from-purple-600 to-pink-600', maxPlayers: 8, route: '/game/logo_guess' },
+  { id: 'car_logo', name: 'لوجو السيارات', emoji: '🚗', description: 'من يعرف اللوجوهات أكثر؟', color: 'from-blue-600 to-cyan-600', maxPlayers: 8, route: '/game/car_logo' },
+  { id: 'brand_logo', name: 'ماركات عالمية', emoji: '🌍', description: 'تحدي الماركات العالمية', color: 'from-orange-600 to-red-600', maxPlayers: 8, route: '/game/brand_logo' },
+  { id: 'phone_guess', name: 'خمّن الهاتف', emoji: '📱', description: 'شركات الهواتف الكبرى', color: 'from-green-600 to-teal-600', maxPlayers: 8, route: '/game/phone_guess' },
+  { id: 'tic_tac_toe', name: 'إكس أو', emoji: '⭕', description: 'الكلاسيكية الخالدة', color: 'from-yellow-600 to-orange-600', maxPlayers: 2, route: '/game/tic_tac_toe' },
+  { id: 'snake', name: 'الثعبان', emoji: '🐍', description: 'كُل وتحدّ صديقك!', color: 'from-emerald-600 to-green-600', maxPlayers: 2, route: '/game/snake' },
+  { id: 'islamic', name: 'الاختبار الإسلامي', emoji: '🕌', description: 'أسئلة دينية وارتقِ في الرتب', color: 'from-teal-700 to-emerald-700', maxPlayers: 1, route: '/game/islamic' },
 ]
 
 export function getRandomQuestions(gameType: string, count: number = 10): Question[] {

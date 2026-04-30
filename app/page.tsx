@@ -1,5 +1,4 @@
 'use client'
-export const dynamic = 'force-dynamic'
 import { useEffect, useState } from 'react'
 import { useTelegram } from '@/lib/useTelegram'
 import { supabase } from '@/lib/supabase'
@@ -130,7 +129,7 @@ export default function Home() {
       {activeTab === 'games' && (
         <div style={{ padding: '0 16px', display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
           {GAME_TYPES.map(game => (
-            <Link key={game.id} href={`/game/${game.id}`} style={{ textDecoration: 'none' }}>
+            <Link key={game.id} href={game.route || `/game/${game.id}`} style={{ textDecoration: 'none' }}>
               <div style={{ background: `linear-gradient(135deg, ${game.color.replace('from-', '').replace(' to-', ', ')})`.replace('from-purple-600, to-pink-600', '#9333ea, #db2777').replace('from-blue-600, to-cyan-600', '#2563eb, #0891b2').replace('from-orange-600, to-red-600', '#ea580c, #dc2626').replace('from-green-600, to-teal-600', '#16a34a, #0d9488').replace('from-yellow-600, to-orange-600', '#ca8a04, #ea580c').replace('from-emerald-600, to-green-600', '#059669, #16a34a'),
                 borderRadius: 20, padding: 16, height: 140, display: 'flex', flexDirection: 'column', justifyContent: 'space-between', cursor: 'pointer', boxShadow: '0 4px 20px rgba(0,0,0,0.3)' }}
                 className="game-card">
