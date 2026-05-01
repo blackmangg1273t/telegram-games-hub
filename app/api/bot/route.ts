@@ -1,14 +1,17 @@
 import { NextRequest, NextResponse } from 'next/server'
 
 const BOT_TOKEN = process.env.TELEGRAM_BOT_TOKEN!
-const WEBAPP_URL = process.env.NEXT_PUBLIC_APP_URL || 'https://telegram-games-hub.vercel.app'
 
 async function sendMessage(chatId: number | string, text: string, options = {}) {
-  await fetch(`https://api.telegram.org/bot${BOT_TOKEN}/sendMessage`, {
+  const response = await fetch(`https://api.telegram.org/bot${BOT_TOKEN}/sendMessage`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ chat_id: chatId, text, parse_mode: 'HTML', ...options }),
   })
+  if (!response.ok) {
+    const errorData = await response.json()
+    console.error('Telegram API Error:', errorData)
+  }
 }
 
 async function answerCallbackQuery(id: string, text?: string) {
@@ -21,6 +24,14 @@ async function answerCallbackQuery(id: string, text?: string) {
 
 export async function POST(req: NextRequest) {
   try {
+    // Determine the base URL dynamically from the request headers
+    const host = req.headers.get('host')
+    const protocol = host?.includes('localhost') ? 'http' : 'https'
+    const dynamicBaseUrl = `${protocol}://${host}`
+    
+    // Priority: ENV variable > Dynamic Host > Fallback
+    const WEBAPP_URL = process.env.NEXT_PUBLIC_APP_URL || dynamicBaseUrl || 'https://telegram-games-hub.vercel.app'
+    
     const update = await req.json()
     
     if (update.callback_query) {
@@ -34,7 +45,7 @@ export async function POST(req: NextRequest) {
     let text = message.text || ''
     const chatType = message.chat.type
 
-    // Remove bot username from commands (e.g., /start@your_bot -> /start)
+    // Remove bot username from commands
     if (text.includes('@')) {
       const parts = text.split(' ')
       const commandPart = parts[0]
