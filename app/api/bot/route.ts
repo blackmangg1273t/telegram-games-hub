@@ -27,12 +27,21 @@ export async function POST(req: NextRequest) {
       await answerCallbackQuery(update.callback_query.id)
     }
 
-    const message = update.message || update.channel_post
+    const message = update.message || update.channel_post || update.edited_message
     if (!message) return NextResponse.json({ ok: true })
 
     const chatId = message.chat.id
-    const text = message.text || ''
+    let text = message.text || ''
     const chatType = message.chat.type
+
+    // Remove bot username from commands (e.g., /start@your_bot -> /start)
+    if (text.includes('@')) {
+      const parts = text.split(' ')
+      const commandPart = parts[0]
+      if (commandPart.startsWith('/')) {
+        text = commandPart.split('@')[0] + (parts.length > 1 ? ' ' + parts.slice(1).join(' ') : '')
+      }
+    }
 
     // /start command
     if (text.startsWith('/start')) {
