@@ -61,6 +61,12 @@ export default function Home() {
   }
 
   if (!isReady) return (
+    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', minHeight: '100vh', background: '#0f172a', flexDirection: 'column', gap: 12 }}>
+      <div style={{ fontSize: 56 }}>🎮</div>
+      <div style={{ color: '#94a3b8', fontSize: 16 }}>جاري التحميل...</div>
+    </div>
+  )
+
   if (isReady && !user) return (
     <div style={{
       display: "flex", alignItems: "center", justifyContent: "center",
@@ -75,11 +81,6 @@ export default function Home() {
         اللعبة بتشتغل جوه تيليجرام فقط.<br />
         افتح البوت وابدأ اللعب من هناك 👇
       </div>
-    </div>
-  );
-    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', minHeight: '100vh', background: '#0f172a', flexDirection: 'column', gap: 12 }}>
-      <div style={{ fontSize: 56 }}>🎮</div>
-      <div style={{ color: '#94a3b8', fontSize: 16 }}>جاري التحميل...</div>
     </div>
   )
 
