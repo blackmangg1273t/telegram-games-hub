@@ -66,7 +66,7 @@ export function useTelegram() {
     const webApp = window.Telegram?.WebApp
 
     if (webApp && webApp.initDataUnsafe?.user) {
-      // ✅ فتح جوه تيليجرام - Private Chat
+      // ✅ فتح جوه تيليجرام كـ Mini App - بيانات حقيقية دايماً
       webApp.ready()
       webApp.expand()
       setTg(webApp)
@@ -75,24 +75,7 @@ export function useTelegram() {
       return
     }
 
-    // ✅ فتح عبر URL في المتصفح - Group Chat
-    // بنقرأ بيانات اليوزر من الـ URL params اللي البوت بعتها
-    const params = new URLSearchParams(window.location.search)
-    const tgId = params.get('tg_id')
-
-    if (tgId) {
-      const userFromUrl: TelegramUser = {
-        id: parseInt(tgId),
-        first_name: params.get('tg_name') || 'لاعب',
-        last_name: params.get('tg_last') || undefined,
-        username: params.get('tg_username') || undefined,
-      }
-      setUser(userFromUrl)
-      setIsReady(true)
-      return
-    }
-
-    // Dev mode fallback
+    // Dev mode fallback فقط - مش بيشتغل في Production
     if (process.env.NODE_ENV === 'development') {
       setUser({
         id: 123456789,
@@ -101,6 +84,7 @@ export function useTelegram() {
         username: 'testuser',
       })
     }
+
     setIsReady(true)
   }, [])
 

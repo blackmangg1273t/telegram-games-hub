@@ -61,6 +61,22 @@ export default function Home() {
   }
 
   if (!isReady) return (
+  if (isReady && !user) return (
+    <div style={{
+      display: "flex", alignItems: "center", justifyContent: "center",
+      minHeight: "100vh", background: "#0f172a", flexDirection: "column",
+      gap: 16, padding: 24, textAlign: "center", fontFamily: "Segoe UI, system-ui, sans-serif"
+    }}>
+      <div style={{ fontSize: 64 }}>🎮</div>
+      <div style={{ color: "white", fontSize: 20, fontWeight: "bold" }}>
+        افتح اللعبة من تيليجرام!
+      </div>
+      <div style={{ color: "#94a3b8", fontSize: 14, lineHeight: 1.6 }}>
+        اللعبة بتشتغل جوه تيليجرام فقط.<br />
+        افتح البوت وابدأ اللعب من هناك 👇
+      </div>
+    </div>
+  );
     <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', minHeight: '100vh', background: '#0f172a', flexDirection: 'column', gap: 12 }}>
       <div style={{ fontSize: 56 }}>🎮</div>
       <div style={{ color: '#94a3b8', fontSize: 16 }}>جاري التحميل...</div>
