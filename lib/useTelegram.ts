@@ -66,30 +66,42 @@ export function useTelegram() {
     const webApp = window.Telegram?.WebApp
 
     if (webApp && webApp.initDataUnsafe?.user) {
-      // ✅ فتح جوه تيليجرام - بياخد اليوزر الحقيقي
+      // ✅ فتح جوه تيليجرام - Private Chat
       webApp.ready()
       webApp.expand()
       setTg(webApp)
       setUser(webApp.initDataUnsafe.user)
       setIsReady(true)
-    } else if (webApp) {
-      // ✅ Telegram WebApp موجود بس مفيش يوزر
-      webApp.ready()
-      webApp.expand()
-      setTg(webApp)
-      setIsReady(true)
-    } else {
-      // ⚠️ فتح في متصفح عادي - Dev mode فقط
-      if (process.env.NODE_ENV === 'development') {
-        setUser({
-          id: 123456789,
-          first_name: 'Test',
-          last_name: 'User',
-          username: 'testuser',
-        })
-      }
-      setIsReady(true)
+      return
     }
+
+    // ✅ فتح عبر URL في المتصفح - Group Chat
+    // بنقرأ بيانات اليوزر من الـ URL params اللي البوت بعتها
+    const params = new URLSearchParams(window.location.search)
+    const tgId = params.get('tg_id')
+
+    if (tgId) {
+      const userFromUrl: TelegramUser = {
+        id: parseInt(tgId),
+        first_name: params.get('tg_name') || 'لاعب',
+        last_name: params.get('tg_last') || undefined,
+        username: params.get('tg_username') || undefined,
+      }
+      setUser(userFromUrl)
+      setIsReady(true)
+      return
+    }
+
+    // Dev mode fallback
+    if (process.env.NODE_ENV === 'development') {
+      setUser({
+        id: 123456789,
+        first_name: 'Test',
+        last_name: 'User',
+        username: 'testuser',
+      })
+    }
+    setIsReady(true)
   }, [])
 
   return { tg, user, isReady }
