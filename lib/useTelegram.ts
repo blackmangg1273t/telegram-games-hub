@@ -64,20 +64,30 @@ export function useTelegram() {
 
   useEffect(() => {
     const webApp = window.Telegram?.WebApp
-    if (webApp) {
+
+    if (webApp && webApp.initDataUnsafe?.user) {
+      // ✅ فتح جوه تيليجرام - بياخد اليوزر الحقيقي
       webApp.ready()
       webApp.expand()
       setTg(webApp)
-      setUser(webApp.initDataUnsafe.user || null)
+      setUser(webApp.initDataUnsafe.user)
+      setIsReady(true)
+    } else if (webApp) {
+      // ✅ Telegram WebApp موجود بس مفيش يوزر
+      webApp.ready()
+      webApp.expand()
+      setTg(webApp)
       setIsReady(true)
     } else {
-      // Dev mode fallback
-      setUser({
-        id: 123456789,
-        first_name: 'Test',
-        last_name: 'User',
-        username: 'testuser',
-      })
+      // ⚠️ فتح في متصفح عادي - Dev mode فقط
+      if (process.env.NODE_ENV === 'development') {
+        setUser({
+          id: 123456789,
+          first_name: 'Test',
+          last_name: 'User',
+          username: 'testuser',
+        })
+      }
       setIsReady(true)
     }
   }, [])
