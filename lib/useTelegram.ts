@@ -1,5 +1,5 @@
 'use client'
-import { useEffect, useState } from 'react'
+import { useEffect, useState, useRef } from 'react'
 
 export interface TelegramUser {
   id: number
@@ -61,31 +61,55 @@ export function useTelegram() {
   const [tg, setTg] = useState<TelegramWebApp | null>(null)
   const [user, setUser] = useState<TelegramUser | null>(null)
   const [isReady, setIsReady] = useState(false)
+  const authAttempted = useRef(false)
 
   useEffect(() => {
-    const webApp = window.Telegram?.WebApp
+    if (authAttempted.current) return
+    authAttempted.current = true
 
-    if (webApp && webApp.initDataUnsafe?.user) {
-      // ✅ فتح جوه تيليجرام كـ Mini App - بيانات حقيقية دايماً
-      webApp.ready()
-      webApp.expand()
-      setTg(webApp)
-      setUser(webApp.initDataUnsafe.user)
+    async function init() {
+      const webApp = window.Telegram?.WebApp
+
+      // Determine initData to send
+      let initDataToSend: string | null = null
+
+      if (webApp?.initData) {
+        // Real Telegram Mini App
+        webApp.ready()
+        webApp.expand()
+        setTg(webApp)
+        initDataToSend = webApp.initData
+      } else if (process.env.NODE_ENV === 'development') {
+        // Dev mode fallback
+        initDataToSend = 'dev_mode'
+      } else {
+        // Not in Telegram and not dev mode
+        setIsReady(true)
+        return
+      }
+
+      // Validate with server
+      try {
+        const res = await fetch('/api/auth/telegram', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ initData: initDataToSend }),
+        })
+
+        if (res.ok) {
+          const data = await res.json()
+          if (data.user) {
+            setUser(data.user)
+          }
+        }
+      } catch (err) {
+        console.error('Auth failed:', err)
+      }
+
       setIsReady(true)
-      return
     }
 
-    // Dev mode fallback فقط - مش بيشتغل في Production
-    if (process.env.NODE_ENV === 'development') {
-      setUser({
-        id: 123456789,
-        first_name: 'Test',
-        last_name: 'User',
-        username: 'testuser',
-      })
-    }
-
-    setIsReady(true)
+    init()
   }, [])
 
   return { tg, user, isReady }
