@@ -19,6 +19,17 @@ async function answerCallbackQuery(id: string, text?: string) {
   })
 }
 
+// بيبني الرابط مع بيانات اليوزر
+function buildUrl(path: string, user: { id: number; first_name: string; last_name?: string; username?: string }) {
+  const params = new URLSearchParams({
+    tg_id: String(user.id),
+    tg_name: user.first_name,
+    ...(user.last_name && { tg_last: user.last_name }),
+    ...(user.username && { tg_username: user.username }),
+  })
+  return `${WEBAPP_URL}${path}?${params.toString()}`
+}
+
 export async function POST(req: NextRequest) {
   try {
     const update = await req.json()
@@ -33,29 +44,39 @@ export async function POST(req: NextRequest) {
     const chatId = message.chat.id
     const text = message.text || ''
     const chatType = message.chat.type
+    const isPrivate = chatType === 'private'
+    const from = message.from
+
+    // Private: web_app | Group: url مع بيانات اليوزر
+    function btn(label: string, path: string) {
+      if (isPrivate) {
+        return { text: label, web_app: { url: `${WEBAPP_URL}${path}` } }
+      }
+      return { text: label, url: buildUrl(path, from) }
+    }
 
     if (text.startsWith('/start')) {
       const gameButtons = {
         inline_keyboard: [
-          [{ text: '🎮 فتح صالة الألعاب', web_app: { url: WEBAPP_URL } }],
+          [btn('🎮 فتح صالة الألعاب', '')],
           [
-            { text: '🎯 تخمين اللوجو', web_app: { url: `${WEBAPP_URL}/game/logo_guess` } },
-            { text: '🚗 لوجو السيارات', web_app: { url: `${WEBAPP_URL}/game/car_logo` } },
+            btn('🎯 تخمين اللوجو', '/game/logo_guess'),
+            btn('🚗 لوجو السيارات', '/game/car_logo'),
           ],
           [
-            { text: '⭕ إكس أو', web_app: { url: `${WEBAPP_URL}/game/tic_tac_toe` } },
-            { text: '🐍 الثعبان', web_app: { url: `${WEBAPP_URL}/game/snake` } },
+            btn('⭕ إكس أو', '/game/tic_tac_toe'),
+            btn('🐍 الثعبان', '/game/snake'),
           ],
-          [{ text: '🕌 الاختبار الإسلامي', web_app: { url: `${WEBAPP_URL}/game/islamic` } }],
+          [btn('🕌 الاختبار الإسلامي', '/game/islamic')],
           [
-            { text: '🚪 إنشاء غرفة', web_app: { url: `${WEBAPP_URL}/rooms/create` } },
-            { text: '🔑 ادخل بكود', web_app: { url: `${WEBAPP_URL}/rooms/join` } },
+            btn('🚪 إنشاء غرفة', '/rooms/create'),
+            btn('🔑 ادخل بكود', '/rooms/join'),
           ],
         ]
       }
 
-      const welcomeText = chatType === 'private'
-        ? `🎮 <b>أهلاً ${message.from?.first_name || 'لاعب'}!</b>\n\nمرحباً في صالة الألعاب التنافسية!\n\n🎯 خمّن اللوجوهات\n🚗 سيارات وماركات عالمية\n⭕ إكس أو مع أصدقائك\n🐍 لعبة الثعبان\n🕌 الاختبار الإسلامي\n\nاضغط على أي لعبة للبدء! 🚀`
+      const welcomeText = isPrivate
+        ? `🎮 <b>أهلاً ${from?.first_name || 'لاعب'}!</b>\n\nمرحباً في صالة الألعاب التنافسية!\n\n🎯 خمّن اللوجوهات\n🚗 سيارات وماركات عالمية\n⭕ إكس أو مع أصدقائك\n🐍 لعبة الثعبان\n🕌 الاختبار الإسلامي\n\nاضغط على أي لعبة للبدء! 🚀`
         : `🎮 <b>صالة الألعاب جاهزة!</b>\n\nاضغط على أي زر للعب مع الجميع في المجموعة! 🏆`
 
       await sendMessage(chatId, welcomeText, { reply_markup: gameButtons })
@@ -65,13 +86,13 @@ export async function POST(req: NextRequest) {
       await sendMessage(chatId, '🎮 اختر لعبتك:', {
         reply_markup: {
           inline_keyboard: [
-            [{ text: '🎯 تخمين اللوجو', web_app: { url: `${WEBAPP_URL}/game/logo_guess` } }],
-            [{ text: '🚗 لوجو السيارات', web_app: { url: `${WEBAPP_URL}/game/car_logo` } }],
-            [{ text: '🌍 ماركات عالمية', web_app: { url: `${WEBAPP_URL}/game/brand_logo` } }],
-            [{ text: '📱 خمّن الهاتف', web_app: { url: `${WEBAPP_URL}/game/phone_guess` } }],
-            [{ text: '⭕ إكس أو', web_app: { url: `${WEBAPP_URL}/game/tic_tac_toe` } }],
-            [{ text: '🐍 الثعبان', web_app: { url: `${WEBAPP_URL}/game/snake` } }],
-            [{ text: '🕌 الاختبار الإسلامي', web_app: { url: `${WEBAPP_URL}/game/islamic` } }],
+            [btn('🎯 تخمين اللوجو', '/game/logo_guess')],
+            [btn('🚗 لوجو السيارات', '/game/car_logo')],
+            [btn('🌍 ماركات عالمية', '/game/brand_logo')],
+            [btn('📱 خمّن الهاتف', '/game/phone_guess')],
+            [btn('⭕ إكس أو', '/game/tic_tac_toe')],
+            [btn('🐍 الثعبان', '/game/snake')],
+            [btn('🕌 الاختبار الإسلامي', '/game/islamic')],
           ]
         }
       })
@@ -81,9 +102,9 @@ export async function POST(req: NextRequest) {
       await sendMessage(chatId, '🚪 إدارة الغرف:', {
         reply_markup: {
           inline_keyboard: [
-            [{ text: '➕ إنشاء غرفة جديدة', web_app: { url: `${WEBAPP_URL}/rooms/create` } }],
-            [{ text: '🔑 ادخل بكود الغرفة', web_app: { url: `${WEBAPP_URL}/rooms/join` } }],
-            [{ text: '🌐 الغرف العامة', web_app: { url: WEBAPP_URL } }],
+            [btn('➕ إنشاء غرفة جديدة', '/rooms/create')],
+            [btn('🔑 ادخل بكود الغرفة', '/rooms/join')],
+            [btn('🌐 الغرف العامة', '')],
           ]
         }
       })
