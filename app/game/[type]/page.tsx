@@ -10,22 +10,30 @@ export default function GamePage() {
   const router = useRouter()
   const { user } = useTelegram()
   const [loading, setLoading] = useState(false)
-  
+
   const gameType = params.type as string
   const game = GAME_TYPES.find(g => g.id === gameType)
 
-  // Snake is single player - start directly
+  // Snake has its own dedicated page
   if (gameType === 'snake') {
-    return <SnakeGame />
+    router.replace('/game/snake')
+    return null
   }
 
-  if (!game) return <div className="p-4 text-center">لعبة غير موجودة</div>
+  if (!game) return (
+    <div style={{ minHeight: '100vh', background: '#0f172a', display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'white', fontFamily: 'Segoe UI,system-ui,sans-serif' }}>
+      <div style={{ textAlign: 'center' }}>
+        <div style={{ fontSize: 48, marginBottom: 12 }}>😕</div>
+        <div style={{ fontSize: 18 }}>لعبة غير موجودة</div>
+        <button onClick={() => router.push('/')} style={{ marginTop: 16, background: '#4f46e5', color: 'white', border: 'none', borderRadius: 12, padding: '10px 24px', cursor: 'pointer' }}>← الرئيسية</button>
+      </div>
+    </div>
+  )
 
   async function createRoom(isPublic: boolean) {
     if (!user || loading) return
     setLoading(true)
-    
-    // Ensure user exists
+
     await supabase.from('users').upsert({
       telegram_id: user.id,
       username: user.username,
@@ -38,192 +46,114 @@ export default function GamePage() {
       host_telegram_id: user.id,
       game_type: gameType,
       is_public: isPublic,
-      max_players: game!.maxPlayers,
-      total_rounds: 10,
+      max_players: game.maxPlayers,
+      total_rounds: gameType === 'tic_tac_toe' ? 1 : 10,
+      status: 'waiting',
+      current_round: 0,
+      game_data: {},
     }).select().single()
 
     if (error || !room) { setLoading(false); return }
 
-    await supabase.from('room_members').insert({
-      room_id: room.id,
-      telegram_id: user.id,
-    })
-
+    await supabase.from('room_members').insert({ room_id: room.id, telegram_id: user.id })
     router.push(`/rooms/${room.id}`)
     setLoading(false)
   }
 
+  // Parse gradient color string from game config
+  const gradientMap: Record<string, string> = {
+    'from-purple-600 to-pink-600': 'linear-gradient(135deg, #9333ea, #db2777)',
+    'from-blue-600 to-cyan-600': 'linear-gradient(135deg, #2563eb, #0891b2)',
+    'from-orange-600 to-red-600': 'linear-gradient(135deg, #ea580c, #dc2626)',
+    'from-green-600 to-teal-600': 'linear-gradient(135deg, #16a34a, #0d9488)',
+    'from-yellow-600 to-orange-600': 'linear-gradient(135deg, #ca8a04, #ea580c)',
+    'from-emerald-600 to-green-600': 'linear-gradient(135deg, #059669, #16a34a)',
+    'from-teal-700 to-emerald-700': 'linear-gradient(135deg, #0f766e, #047857)',
+  }
+  const heroGradient = gradientMap[game.color] || 'linear-gradient(135deg, #4f46e5, #7c3aed)'
+
+  const howToPlay: Record<string, { icon: string; tips: string[] }> = {
+    tic_tac_toe: { icon: '⭕', tips: ['أنت ضد لاعب آخر', 'تناوبا في وضع X أو O', 'من يكمل صف أو عمود أو قطر يفوز', 'المضيف يلعب بـ X والضيف بـ O'] },
+    logo_guess:  { icon: '🎯', tips: ['تظهر صورة اللوجو', 'اكتب اسم الشركة أو الماركة', 'كلما كنت أسرع كلما نلت نقاطاً أكثر', '10 جولات - أعلى مجموع يفوز'] },
+    car_logo:    { icon: '🚗', tips: ['خمّن لوجو السيارة', 'الإجابة بالعربي أو الإنجليزي', 'تقبل اللقطب والأسماء المشابهة', '10 جولات تنافسية'] },
+    brand_logo:  { icon: '🌍', tips: ['ماركات عالمية شهيرة', 'من تقنية لرياضة لطعام ومشروبات', 'الإجابة بالعربي أو الإنجليزي', '10 جولات - أعلى مجموع يفوز'] },
+    phone_guess: { icon: '📱', tips: ['خمّن شركة الهاتف', 'من Apple إلى Xiaomi وما بينهم', 'الإجابة بالعربي أو الإنجليزي', '10 جولات تنافسية'] },
+    islamic:     { icon: '🕌', tips: ['أسئلة دينية متنوعة', '4 اختيارات لكل سؤال', '20 ثانية للإجابة', 'ارتقِ في الرتب وسجّل النقاط'] },
+  }
+  const guide = howToPlay[gameType] || howToPlay.logo_guess
+
   return (
-    <div className="min-h-screen flex flex-col">
+    <div style={{ minHeight: '100vh', display: 'flex', flexDirection: 'column', fontFamily: 'Segoe UI,system-ui,sans-serif', background: '#0f172a', color: 'white' }}>
       {/* Hero */}
-      <div className={`bg-gradient-to-br ${game.color} p-8 pt-12 flex flex-col items-center text-center`}>
-        <button onClick={() => router.back()} className="absolute top-4 right-4 text-white/70 text-2xl">←</button>
-        <div className="text-7xl mb-4">{game.emoji}</div>
-        <h1 className="text-3xl font-bold text-white mb-2">{game.name}</h1>
-        <p className="text-white/80 text-lg">{game.description}</p>
-        <div className="flex gap-4 mt-4 text-white/60 text-sm">
-          <span>👥 حتى {game.maxPlayers} لاعبين</span>
-          <span>⏱️ 10 جولات</span>
-          <span>⚡ تنافسي</span>
+      <div style={{ background: heroGradient, padding: '48px 24px 36px', display: 'flex', flexDirection: 'column', alignItems: 'center', textAlign: 'center', position: 'relative' }}>
+        <button onClick={() => router.back()} style={{ position: 'absolute', top: 16, right: 16, background: 'rgba(255,255,255,0.15)', border: 'none', borderRadius: 20, color: 'white', padding: '6px 14px', cursor: 'pointer', fontSize: 14 }}>← رجوع</button>
+        <div style={{ fontSize: 72, marginBottom: 12, filter: 'drop-shadow(0 4px 12px rgba(0,0,0,0.3))' }}>{game.emoji}</div>
+        <h1 style={{ fontSize: 30, fontWeight: 'bold', marginBottom: 8, textShadow: '0 2px 8px rgba(0,0,0,0.3)' }}>{game.name}</h1>
+        <p style={{ color: 'rgba(255,255,255,0.85)', fontSize: 16, marginBottom: 16 }}>{game.description}</p>
+        <div style={{ display: 'flex', gap: 16, color: 'rgba(255,255,255,0.7)', fontSize: 13 }}>
+          <span style={{ background: 'rgba(0,0,0,0.2)', padding: '4px 12px', borderRadius: 20 }}>👥 حتى {game.maxPlayers} لاعبين</span>
+          {gameType !== 'tic_tac_toe' && <span style={{ background: 'rgba(0,0,0,0.2)', padding: '4px 12px', borderRadius: 20 }}>⏱️ {gameType === 'islamic' ? '15 سؤال' : '10 جولات'}</span>}
+          <span style={{ background: 'rgba(0,0,0,0.2)', padding: '4px 12px', borderRadius: 20 }}>⚡ تنافسي</span>
         </div>
       </div>
 
       {/* Actions */}
-      <div className="flex-1 bg-gray-950 p-6 pt-8">
-        <h2 className="text-xl font-bold mb-6 text-center">ابدأ اللعب</h2>
-        
-        <div className="space-y-4">
-          <button
-            onClick={() => createRoom(true)}
-            disabled={loading}
-            className="w-full bg-gradient-to-r from-green-600 to-teal-600 text-white rounded-2xl p-4 font-bold text-lg flex items-center gap-3 disabled:opacity-50"
-          >
-            <span className="text-3xl">🌐</span>
-            <div className="text-right">
+      <div style={{ flex: 1, padding: '24px 16px 32px' }}>
+        <h2 style={{ fontSize: 18, fontWeight: 'bold', marginBottom: 16, textAlign: 'center', color: '#e2e8f0' }}>ابدأ اللعب</h2>
+
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 12, marginBottom: 24 }}>
+          {/* Public room */}
+          <button onClick={() => createRoom(true)} disabled={loading}
+            style={{ background: loading ? 'rgba(5,150,105,0.4)' : 'linear-gradient(135deg,#059669,#0d9488)', color: 'white', border: 'none', borderRadius: 20, padding: '16px 20px', fontWeight: 'bold', fontSize: 16, cursor: loading ? 'not-allowed' : 'pointer', display: 'flex', alignItems: 'center', gap: 14, transition: 'all 0.2s' }}>
+            <span style={{ fontSize: 32 }}>🌐</span>
+            <div style={{ textAlign: 'right' }}>
               <div>غرفة عامة</div>
-              <div className="text-sm font-normal text-white/70">يمكن لأي شخص الانضمام</div>
+              <div style={{ fontSize: 12, fontWeight: 'normal', color: 'rgba(255,255,255,0.7)' }}>يمكن لأي شخص الانضمام من القائمة</div>
             </div>
           </button>
 
-          <button
-            onClick={() => createRoom(false)}
-            disabled={loading}
-            className="w-full bg-gradient-to-r from-purple-600 to-indigo-600 text-white rounded-2xl p-4 font-bold text-lg flex items-center gap-3 disabled:opacity-50"
-          >
-            <span className="text-3xl">🔒</span>
-            <div className="text-right">
+          {/* Private room */}
+          <button onClick={() => createRoom(false)} disabled={loading}
+            style={{ background: loading ? 'rgba(79,70,229,0.4)' : 'linear-gradient(135deg,#4f46e5,#7c3aed)', color: 'white', border: 'none', borderRadius: 20, padding: '16px 20px', fontWeight: 'bold', fontSize: 16, cursor: loading ? 'not-allowed' : 'pointer', display: 'flex', alignItems: 'center', gap: 14, transition: 'all 0.2s' }}>
+            <span style={{ fontSize: 32 }}>🔒</span>
+            <div style={{ textAlign: 'right' }}>
               <div>غرفة خاصة</div>
-              <div className="text-sm font-normal text-white/70">ادعُ أصدقاءك فقط</div>
+              <div style={{ fontSize: 12, fontWeight: 'normal', color: 'rgba(255,255,255,0.7)' }}>ادعُ أصدقاءك بكود سري</div>
             </div>
           </button>
 
-          <button
-            onClick={() => router.push('/rooms/join')}
-            className="w-full bg-white/10 text-white rounded-2xl p-4 font-bold text-lg flex items-center gap-3"
-          >
-            <span className="text-3xl">🔑</span>
-            <div className="text-right">
+          {/* Join by code */}
+          <button onClick={() => router.push('/rooms/join')}
+            style={{ background: 'rgba(255,255,255,0.08)', border: '1px solid rgba(255,255,255,0.12)', color: 'white', borderRadius: 20, padding: '16px 20px', fontWeight: 'bold', fontSize: 16, cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 14 }}>
+            <span style={{ fontSize: 32 }}>🔑</span>
+            <div style={{ textAlign: 'right' }}>
               <div>ادخل بكود</div>
-              <div className="text-sm font-normal text-gray-400">لديك كود غرفة؟</div>
+              <div style={{ fontSize: 12, fontWeight: 'normal', color: '#94a3b8' }}>لديك كود غرفة؟ ادخل منه</div>
             </div>
           </button>
         </div>
 
         {loading && (
-          <div className="text-center mt-6 text-gray-400">
-            <div className="text-3xl animate-spin mb-2">⚙️</div>
+          <div style={{ textAlign: 'center', color: '#94a3b8', marginBottom: 20 }}>
+            <div style={{ fontSize: 28, marginBottom: 8, animation: 'spin 1s linear infinite' }}>⚙️</div>
             جاري إنشاء الغرفة...
           </div>
         )}
 
         {/* How to play */}
-        <div className="mt-8 bg-white/5 rounded-2xl p-4">
-          <h3 className="font-bold mb-3 text-gray-300">🎯 كيف تلعب؟</h3>
-          {gameType === 'tic_tac_toe' ? (
-            <div className="text-gray-400 text-sm space-y-2">
-              <p>• أنت ضد لاعب آخر</p>
-              <p>• تناوبا في وضع X أو O</p>
-              <p>• من يكمل صف أو عمود أو قطر يفوز</p>
-            </div>
-          ) : (
-            <div className="text-gray-400 text-sm space-y-2">
-              <p>• تظهر صورة اللوجو أو الماركة</p>
-              <p>• اكتب إجابتك بأسرع ما يمكن</p>
-              <p>• كلما كنت أسرع كلما نلت نقاطاً أكثر</p>
-              <p>• 10 جولات - أعلى مجموع يفوز</p>
-            </div>
-          )}
+        <div style={{ background: 'rgba(255,255,255,0.04)', border: '1px solid rgba(255,255,255,0.08)', borderRadius: 20, padding: '16px 20px' }}>
+          <h3 style={{ fontWeight: 'bold', marginBottom: 12, color: '#cbd5e1', display: 'flex', alignItems: 'center', gap: 8 }}>
+            <span>{guide.icon}</span> كيف تلعب؟
+          </h3>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+            {guide.tips.map((tip, i) => (
+              <div key={i} style={{ display: 'flex', alignItems: 'flex-start', gap: 10, color: '#94a3b8', fontSize: 14 }}>
+                <span style={{ background: 'rgba(99,102,241,0.3)', color: '#818cf8', borderRadius: '50%', width: 22, height: 22, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 11, fontWeight: 'bold', flexShrink: 0 }}>{i + 1}</span>
+                <span>{tip}</span>
+              </div>
+            ))}
+          </div>
         </div>
-      </div>
-    </div>
-  )
-}
-
-// Snake Game Component
-function SnakeGame() {
-  const router = useRouter()
-  const [gameState, setGameState] = useState<'idle' | 'playing' | 'dead'>('idle')
-  const [score, setScore] = useState(0)
-  const [snake, setSnake] = useState([[10, 10]])
-  const [food, setFood] = useState([15, 15])
-  const [dir, setDir] = useState([0, 1])
-  const [gameLoop, setGameLoop] = useState<ReturnType<typeof setInterval> | null>(null)
-
-  const GRID = 20
-
-  function startGame() {
-    setSnake([[10, 10]])
-    setFood([Math.floor(Math.random() * GRID), Math.floor(Math.random() * GRID)])
-    setDir([0, 1])
-    setScore(0)
-    setGameState('playing')
-    
-    const loop = setInterval(() => {
-      setSnake(prev => {
-        const newHead = [(prev[0][0] + dir[0] + GRID) % GRID, (prev[0][1] + dir[1] + GRID) % GRID]
-        if (prev.some(s => s[0] === newHead[0] && s[1] === newHead[1])) {
-          clearInterval(loop)
-          setGameState('dead')
-          return prev
-        }
-        const newSnake = [newHead, ...prev]
-        if (newHead[0] === food[0] && newHead[1] === food[1]) {
-          setScore(s => s + 10)
-          setFood([Math.floor(Math.random() * GRID), Math.floor(Math.random() * GRID)])
-        } else {
-          newSnake.pop()
-        }
-        return newSnake
-      })
-    }, 180)
-    setGameLoop(loop)
-  }
-
-  function changeDir(newDir: number[]) {
-    if (newDir[0] !== -dir[0] || newDir[1] !== -dir[1]) {
-      setDir(newDir)
-    }
-  }
-
-  return (
-    <div className="min-h-screen flex flex-col items-center bg-gray-950 p-4 pt-8">
-      <button onClick={() => { if(gameLoop) clearInterval(gameLoop); router.back() }} className="self-start text-gray-400 text-xl mb-4">← رجوع</button>
-      <div className="text-4xl mb-2">🐍</div>
-      <h1 className="text-2xl font-bold mb-1">لعبة الثعبان</h1>
-      <div className="text-yellow-400 font-bold text-xl mb-4">النقاط: {score}</div>
-
-      <div className="border-2 border-green-500/30 rounded-xl overflow-hidden mb-6"
-        style={{ display: 'grid', gridTemplateColumns: `repeat(${GRID}, 14px)`, gridTemplateRows: `repeat(${GRID}, 14px)` }}>
-        {Array.from({ length: GRID * GRID }, (_, i) => {
-          const row = Math.floor(i / GRID)
-          const col = i % GRID
-          const isSnake = snake.some(s => s[0] === row && s[1] === col)
-          const isHead = snake[0]?.[0] === row && snake[0]?.[1] === col
-          const isFood = food[0] === row && food[1] === col
-          return (
-            <div key={i} style={{ width: 14, height: 14 }}
-              className={`${isHead ? 'bg-green-400 rounded-sm' : isSnake ? 'bg-green-600' : isFood ? 'bg-red-500 rounded-full' : 'bg-gray-900'}`}
-            />
-          )
-        })}
-      </div>
-
-      {gameState !== 'playing' && (
-        <button onClick={startGame} className="bg-green-600 text-white rounded-2xl px-8 py-3 font-bold text-lg mb-6">
-          {gameState === 'dead' ? '🔄 العب مجدداً' : '▶️ ابدأ اللعبة'}
-        </button>
-      )}
-
-      {gameState === 'dead' && <div className="text-red-400 font-bold text-xl mb-4">💀 انتهت اللعبة!</div>}
-
-      {/* Controls */}
-      <div className="grid grid-cols-3 gap-2">
-        <div />
-        <button onClick={() => changeDir([-1, 0])} className="bg-white/10 rounded-xl p-3 text-2xl">⬆️</button>
-        <div />
-        <button onClick={() => changeDir([0, -1])} className="bg-white/10 rounded-xl p-3 text-2xl">⬅️</button>
-        <button onClick={() => changeDir([1, 0])} className="bg-white/10 rounded-xl p-3 text-2xl">⬇️</button>
-        <button onClick={() => changeDir([0, 1])} className="bg-white/10 rounded-xl p-3 text-2xl">➡️</button>
       </div>
     </div>
   )
