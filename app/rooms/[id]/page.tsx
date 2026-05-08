@@ -168,6 +168,13 @@ export default function RoomPage() {
   const isTicTacToe = room?.game_type === 'tic_tac_toe'
   const isHost = user?.id === room?.host_telegram_id
 
+  // Grace period state: when host goes away, countdown before room deletion
+  const [hostAway, setHostAway] = useState(false)
+  const [graceSeconds, setGraceSeconds] = useState(0)
+  const hostAwayRef = useRef(false)
+  const graceTimerRef = useRef<ReturnType<typeof setInterval> | null>(null)
+  const GRACE_PERIOD_SECONDS = 180 // 3 minutes grace period
+
   // ── Auto-delete room ──────────────────────────────────────────────────
   const deleteRoom = useCallback(async () => {
     await supabase.from('room_members').delete().eq('room_id', roomId)
@@ -185,6 +192,73 @@ export default function RoomPage() {
     }
     router.push('/')
   }, [user, isHost, roomId, deleteRoom, router])
+
+  // ── Heartbeat: update last_seen every 30s ──────────────────────────────
+  useEffect(() => {
+    if (!user) return
+    const beat = () => {
+      supabase.from('users').update({ last_seen: new Date().toISOString() }).eq('telegram_id', user.id).then()
+    }
+    beat()
+    const id = setInterval(beat, 30000)
+    return () => clearInterval(id)
+  }, [user])
+
+  // ── Visibility change: detect when host leaves the app ────────────────
+  useEffect(() => {
+    if (!isHost || !room) return
+
+    const onVisibilityChange = () => {
+      if (document.visibilityState === 'hidden') {
+        // Host went away — start grace period
+        hostAwayRef.current = true
+        setHostAway(true)
+        setGraceSeconds(GRACE_PERIOD_SECONDS)
+
+        if (graceTimerRef.current) clearInterval(graceTimerRef.current)
+        graceTimerRef.current = setInterval(() => {
+          setGraceSeconds(prev => {
+            if (prev <= 1) {
+              if (graceTimerRef.current) clearInterval(graceTimerRef.current)
+              // Grace period expired — delete the room
+              deleteRoom()
+              return 0
+            }
+            return prev - 1
+          })
+        }, 1000)
+      } else if (document.visibilityState === 'visible') {
+        // Host came back — cancel grace period
+        hostAwayRef.current = false
+        setHostAway(false)
+        if (graceTimerRef.current) clearInterval(graceTimerRef.current)
+        setGraceSeconds(0)
+      }
+    }
+
+    document.addEventListener('visibilitychange', onVisibilityChange)
+    return () => {
+      document.removeEventListener('visibilitychange', onVisibilityChange)
+      if (graceTimerRef.current) clearInterval(graceTimerRef.current)
+    }
+  }, [isHost, room, deleteRoom])
+
+  // ── Detect host member leaving (via realtime) ─────────────────────────
+  useEffect(() => {
+    if (!room || !user) return
+    // If the host is no longer in the members list and the game hasn't started, delete room
+    if (room.status === 'waiting' && members.length > 0) {
+      const hostStillPresent = members.some(m => m.telegram_id === room.host_telegram_id)
+      if (!hostStillPresent) {
+        // Host was removed — delete room
+        deleteRoom()
+      }
+    }
+    // If room has 0 members, delete it
+    if (members.length === 0 && room.status === 'waiting') {
+      deleteRoom()
+    }
+  }, [members, room, user, deleteRoom])
 
   // ── Copy code ─────────────────────────────────────────────────────────
   const copyCode = useCallback(() => {
@@ -546,8 +620,39 @@ export default function RoomPage() {
         ← {isHost ? 'مغادرة وحذف الغرفة' : 'مغادرة الغرفة'}
       </button>
 
+      {/* Host-away grace period banner */}
+      {hostAway && isHost && graceSeconds > 0 && (
+        <div style={{
+          background: 'rgba(239,68,68,0.12)', border: '1px solid rgba(239,68,68,0.35)',
+          borderRadius: 16, padding: '12px 14px', marginBottom: 14,
+        }}>
+          <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: 10 }}>
+            <div style={{ display: 'flex', gap: 10, alignItems: 'flex-start', flex: 1 }}>
+              <span style={{ fontSize: 22, flexShrink: 0 }}>⚠️</span>
+              <div>
+                <div style={{ fontWeight: 'bold', fontSize: 13, color: '#f87171', marginBottom: 3 }}>
+                  غادرت التطبيق — الغرفة ستُحذف!
+                </div>
+                <div style={{ fontSize: 12, color: '#94a3b8', lineHeight: 1.6 }}>
+                  إذا لم تعد خلال المهلة، ستُحذف الغرفة تلقائياً.
+                  ابقَ في التطبيق للاحتفاظ بالغرفة.
+                </div>
+              </div>
+            </div>
+            <div style={{ textAlign: 'center', flexShrink: 0 }}>
+              <div style={{ fontFamily: 'monospace', fontWeight: 'bold', fontSize: 22, color: '#f87171', lineHeight: 1 }}>
+                {Math.floor(graceSeconds / 60)}:{(graceSeconds % 60).toString().padStart(2, '0')}
+              </div>
+            </div>
+          </div>
+          <div style={{ height: 4, background: 'rgba(255,255,255,0.08)', borderRadius: 4, overflow: 'hidden', marginTop: 10 }}>
+            <div style={{ height: '100%', width: `${(graceSeconds / GRACE_PERIOD_SECONDS) * 100}%`, background: '#ef4444', borderRadius: 4, transition: 'width 1s linear' }} />
+          </div>
+        </div>
+      )}
+
       {/* Expiry banner — only when host is alone and room has expires_at */}
-      {isHost && members.length <= 1 && room.expires_at && (
+      {isHost && members.length <= 1 && room.expires_at && !hostAway && (
         <ExpiryBanner expiresAt={room.expires_at} onExpired={deleteRoom} />
       )}
 
@@ -587,10 +692,21 @@ export default function RoomPage() {
             ① اضغط <strong style={{ color: 'white' }}>📋 نسخ</strong> لنسخ الكود<br />
             ② ارجع لتيليجرام وأرسله لصديقك<br />
             ③ اطلب منه يفتح البوت ويدخل الكود<br />
-            <span style={{ color: '#fbbf24' }}>⏳ لديك 5 دقائق قبل حذف الغرفة تلقائياً</span>
+            <span style={{ color: '#fbbf24' }}>⏳ لديك 5 دقائق قبل حذف الغرفة تلقائياً</span><br />
+            <span style={{ color: '#f87171' }}>⚠️ إذا غادرت التطبيق، لديك 3 دقائق للعودة قبل حذف الغرفة</span>
           </div>
         </div>
       </div>
+
+      {/* Grace period explanation for non-host users */}
+      {!isHost && (
+        <div style={{ background: 'rgba(245,158,11,0.08)', border: '1px solid rgba(245,158,11,0.2)', borderRadius: 14, padding: '10px 14px', marginBottom: 16 }}>
+          <div style={{ fontSize: 12, color: '#94a3b8', lineHeight: 1.6, display: 'flex', gap: 8, alignItems: 'flex-start' }}>
+            <span style={{ fontSize: 16, flexShrink: 0 }}>ℹ️</span>
+            <span>إذا غادر <strong style={{ color: '#fbbf24' }}>صاحب الغرفة</strong> التطبيق، سيكون لديه 3 دقائق للعودة. إذا لم يعد، ستُحذف الغرفة تلقائياً.</span>
+          </div>
+        </div>
+      )}
 
       {/* Members section */}
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 }}>

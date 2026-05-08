@@ -7,7 +7,7 @@ import Link from 'next/link'
 
 interface UserStats { total_score: number; games_played: number; games_won: number }
 interface LeaderboardEntry { telegram_id: number; username: string; first_name: string; total_score: number; games_played: number; rank: number }
-interface Room { id: string; code: string; game_type: string; status: string; is_public: boolean; host_telegram_id: number; room_members?: unknown[] }
+interface Room { id: string; code: string; game_type: string; status: string; is_public: boolean; host_telegram_id: number; host_name?: string; expires_at?: string; room_members?: unknown[] }
 
 export default function Home() {
   const { user, isReady } = useTelegram()
@@ -29,6 +29,28 @@ export default function Home() {
   useEffect(() => {
     const interval = setInterval(fetchOnlineCount, 30000)
     return () => clearInterval(interval)
+  }, [])
+
+  // Realtime rooms subscription + periodic refresh
+  useEffect(() => {
+    // Subscribe to rooms table changes
+    const channel = supabase
+      .channel('public_rooms_watch')
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'rooms' }, () => {
+        fetchPublicRooms()
+      })
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'room_members' }, () => {
+        fetchPublicRooms()
+      })
+      .subscribe()
+
+    // Also refresh every 15 seconds as a safety net
+    const interval = setInterval(fetchPublicRooms, 15000)
+
+    return () => {
+      supabase.removeChannel(channel)
+      clearInterval(interval)
+    }
   }, [])
 
   async function registerUser() {
@@ -56,8 +78,22 @@ export default function Home() {
   }
 
   async function fetchPublicRooms() {
-    const { data } = await supabase.from('rooms').select('*, room_members(telegram_id)').eq('is_public', true).eq('status', 'waiting').order('created_at', { ascending: false }).limit(8)
-    if (data) setRooms(data)
+    const { data } = await supabase
+      .from('rooms')
+      .select('*, room_members(telegram_id)')
+      .eq('is_public', true)
+      .eq('status', 'waiting')
+      .order('created_at', { ascending: false })
+      .limit(20)
+
+    if (data) {
+      // Filter out rooms with 0 members (orphaned/empty rooms)
+      const validRooms = data.filter(room => {
+        const memberCount = (room.room_members as unknown[])?.length || 0
+        return memberCount > 0
+      })
+      setRooms(validRooms)
+    }
   }
 
   if (!isReady) return (
@@ -180,24 +216,59 @@ export default function Home() {
             </Link>
           </div>
 
-          <div style={{ color: '#94a3b8', fontSize: 13, marginBottom: 12, fontWeight: '600' }}>🌐 الغرف العامة المتاحة</div>
+          {/* Grace period explanation banner */}
+          <div style={{ background: 'rgba(99,102,241,0.1)', border: '1px solid rgba(99,102,241,0.22)', borderRadius: 16, padding: '12px 14px', marginBottom: 16, display: 'flex', gap: 10, alignItems: 'flex-start' }}>
+            <span style={{ fontSize: 22, flexShrink: 0 }}>💡</span>
+            <div>
+              <div style={{ fontWeight: 'bold', fontSize: 13, color: '#a5b4fc', marginBottom: 4 }}>كيف تعمل الغرف؟</div>
+              <div style={{ fontSize: 11, color: '#94a3b8', lineHeight: 1.7 }}>
+                عند إنشاء غرفة، لديك <strong style={{ color: '#fbbf24' }}>5 دقائق</strong> لمشاركة الكود مع أصدقائك قبل أن تُحذف تلقائياً.
+                إذا غادر صاحب الغرفة، تُحذف الغرفة فوراً. الغرف الفارغة لا تظهر هنا.
+              </div>
+            </div>
+          </div>
+
+          <div style={{ color: '#94a3b8', fontSize: 13, marginBottom: 12, fontWeight: '600' }}>🌐 الغرف العامة المتاحة ({rooms.length})</div>
           {rooms.length === 0 ? (
             <div style={{ textAlign: 'center', padding: '32px 0', color: '#475569' }}>
               <div style={{ fontSize: 40, marginBottom: 8 }}>🚪</div>
-              <div style={{ fontSize: 13 }}>لا توجد غرف الآن</div>
+              <div style={{ fontSize: 13 }}>لا توجد غرف الآن — كن أول من ينشئ واحدة!</div>
             </div>
           ) : rooms.map(room => {
             const game = GAME_TYPES.find(g => g.id === room.game_type)
-            const count = (room.room_members as unknown[])?.length || 0
+            const memberCount = (room.room_members as unknown[])?.length || 0
+            const hostName = room.host_name || 'مضيف'
             return (
               <Link key={room.id} href={`/rooms/${room.id}`} style={{ textDecoration: 'none' }}>
-                <div style={{ background: 'rgba(255,255,255,0.06)', borderRadius: 14, padding: '12px 14px', marginBottom: 8, display: 'flex', alignItems: 'center', gap: 12, cursor: 'pointer' }}>
-                  <div style={{ fontSize: 28 }}>{game?.emoji || '🎮'}</div>
-                  <div style={{ flex: 1 }}>
-                    <div style={{ fontWeight: '600', fontSize: 13 }}>{game?.name}</div>
-                    <div style={{ color: '#94a3b8', fontSize: 11 }}>كود: {room.code} • 👥 {count} لاعب</div>
+                <div style={{
+                  background: 'rgba(255,255,255,0.06)', borderRadius: 14, padding: '14px 14px', marginBottom: 8,
+                  display: 'flex', alignItems: 'center', gap: 12, cursor: 'pointer',
+                  border: '1px solid rgba(255,255,255,0.06)', transition: 'all 0.2s'
+                }}>
+                  <div style={{
+                    width: 48, height: 48, borderRadius: 14, display: 'flex', alignItems: 'center', justifyContent: 'center',
+                    background: `linear-gradient(135deg, ${game?.id === 'islamic' ? '#059669, #0d9488' : game?.id === 'tic_tac_toe' ? '#9333ea, #db2777' : '#4f46e5, #7c3aed'})`,
+                    fontSize: 24, flexShrink: 0
+                  }}>
+                    {game?.emoji || '🎮'}
                   </div>
-                  <div style={{ background: 'rgba(34,197,94,0.2)', color: '#4ade80', fontSize: 11, padding: '4px 10px', borderRadius: 20 }}>انضم</div>
+                  <div style={{ flex: 1, minWidth: 0 }}>
+                    <div style={{ fontWeight: '600', fontSize: 13, marginBottom: 3 }}>{game?.name || 'لعبة'}</div>
+                    <div style={{ color: '#94a3b8', fontSize: 11, display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
+                      <span style={{ display: 'flex', alignItems: 'center', gap: 3 }}>👑 {hostName}</span>
+                      <span style={{ color: '#475569' }}>•</span>
+                      <span style={{ display: 'flex', alignItems: 'center', gap: 3 }}>👥 {memberCount}/{game?.maxPlayers || 8}</span>
+                      <span style={{ color: '#475569' }}>•</span>
+                      <span style={{ fontFamily: 'monospace', color: '#a5b4fc', letterSpacing: 1 }}>{room.code}</span>
+                    </div>
+                  </div>
+                  <div style={{
+                    background: memberCount > 1 ? 'rgba(34,197,94,0.2)' : 'rgba(234,179,8,0.15)',
+                    color: memberCount > 1 ? '#4ade80' : '#fbbf24',
+                    fontSize: 11, padding: '5px 12px', borderRadius: 20, fontWeight: 'bold', whiteSpace: 'nowrap'
+                  }}>
+                    {memberCount > 1 ? 'انضم' : 'انتظار'}
+                  </div>
                 </div>
               </Link>
             )

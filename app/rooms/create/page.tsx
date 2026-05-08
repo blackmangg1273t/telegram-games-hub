@@ -69,7 +69,8 @@ export default function CreateRoom() {
           <span style={{ fontSize: 18 }}>⏳</span>
           <div style={{ fontSize: 12, color: '#94a3b8', lineHeight: 1.7 }}>
             ستُحذف الغرفة تلقائياً بعد <strong style={{ color: '#fbbf24' }}>5 دقائق</strong> إذا لم ينضم أحد.
-            ستجد الكود داخل الغرفة لمشاركته مع أصدقائك.
+            ستجد الكود داخل الغرفة لمشاركته مع أصدقائك.<br />
+            <span style={{ color: '#f87171' }}>⚠️ إذا غادرت التطبيق، لديك 3 دقائق للعودة قبل حذف الغرفة.</span>
           </div>
         </div>
       </div>
