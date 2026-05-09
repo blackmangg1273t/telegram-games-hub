@@ -20,7 +20,10 @@ interface Room {
   expires_at?: string
 }
 
-// ── Logo image with fallback ───────────────────────────────────────────────
+const GRACE_PERIOD_SECONDS = 180 // 3 دقائق
+const EXPIRY_SECONDS = 300       // 5 دقائق
+
+// ── Logo image with fallback ──────────────────────────────────────────────
 function LogoImage({ src, alt, size = 180 }: { src: string; alt: string; size?: number }) {
   const [imgSrc, setImgSrc] = useState(src)
   const [fi, setFi] = useState(0)
@@ -43,19 +46,36 @@ function LogoImage({ src, alt, size = 180 }: { src: string; alt: string; size?: 
   return <img src={imgSrc} alt={alt} onError={onErr} style={{ maxWidth: size, maxHeight: size, objectFit: 'contain' }} />
 }
 
-// ── Expiry countdown banner ────────────────────────────────────────────────
-const EXPIRY_SECONDS = 300 // 5 minutes
+// ── Live member count dots ────────────────────────────────────────────────
+function MemberDots({ count, max }: { count: number; max: number }) {
+  const color = count >= max ? '#4ade80' : count > 1 ? '#fbbf24' : '#94a3b8'
+  return (
+    <div style={{ display: 'flex', alignItems: 'center', gap: 8, background: 'rgba(255,255,255,0.05)', border: '1px solid rgba(255,255,255,0.08)', borderRadius: 20, padding: '5px 12px' }}>
+      <div style={{ display: 'flex', gap: 4, alignItems: 'center' }}>
+        {Array.from({ length: max }).map((_, i) => (
+          <div key={i} style={{
+            width: i < count ? 10 : 8, height: i < count ? 10 : 8,
+            borderRadius: '50%', background: i < count ? color : 'rgba(255,255,255,0.12)',
+            transition: 'all 0.3s', boxShadow: i < count ? `0 0 6px ${color}88` : 'none',
+          }} />
+        ))}
+      </div>
+      <span style={{ fontSize: 13, color, fontWeight: 'bold' }}>{count}</span>
+      <span style={{ fontSize: 11, color: '#64748b' }}>/ {max}</span>
+    </div>
+  )
+}
 
+// ── Expiry countdown banner (5-min grace for code sharing) ───────────────
 function ExpiryBanner({ expiresAt, onExpired }: { expiresAt: string; onExpired: () => void }) {
   const [secs, setSecs] = useState(0)
   const [dismissed, setDismissed] = useState(false)
 
   useEffect(() => {
     const tick = () => {
-      const diff = Math.floor((new Date(expiresAt).getTime() - Date.now()) / 1000)
-      const v = Math.max(0, diff)
-      setSecs(v)
-      if (v <= 0) onExpired()
+      const diff = Math.max(0, Math.floor((new Date(expiresAt).getTime() - Date.now()) / 1000))
+      setSecs(diff)
+      if (diff <= 0) onExpired()
     }
     tick()
     const id = setInterval(tick, 1000)
@@ -63,7 +83,6 @@ function ExpiryBanner({ expiresAt, onExpired }: { expiresAt: string; onExpired: 
   }, [expiresAt, onExpired])
 
   if (dismissed || secs <= 0) return null
-
   const mins = Math.floor(secs / 60)
   const s = secs % 60
   const urgent = secs <= 60
@@ -80,11 +99,10 @@ function ExpiryBanner({ expiresAt, onExpired }: { expiresAt: string; onExpired: 
           <span style={{ fontSize: 22, flexShrink: 0 }}>{urgent ? '⚠️' : '⏳'}</span>
           <div>
             <div style={{ fontWeight: 'bold', fontSize: 13, color: urgent ? '#f87171' : '#fbbf24', marginBottom: 3 }}>
-              {urgent ? 'الغرفة ستُحذف خلال دقيقة!' : 'مهلة الغرفة — أرسل الكود الآن'}
+              {urgent ? 'الغرفة ستُحذف خلال دقيقة!' : 'مهلة مشاركة الكود'}
             </div>
             <div style={{ fontSize: 12, color: '#94a3b8', lineHeight: 1.6 }}>
               اضغط <strong style={{ color: 'white' }}>📋 نسخ</strong> وأرسل الكود لصديقك قبل انتهاء الوقت.
-              إذا لم ينضم أحد ستُحذف الغرفة تلقائياً.
             </div>
           </div>
         </div>
@@ -105,27 +123,6 @@ function ExpiryBanner({ expiresAt, onExpired }: { expiresAt: string; onExpired: 
   )
 }
 
-// ── Member count dots ──────────────────────────────────────────────────────
-function MemberCountBadge({ count, max }: { count: number; max: number }) {
-  const full = count >= max
-  const color = full ? '#4ade80' : count > 1 ? '#fbbf24' : '#94a3b8'
-  return (
-    <div style={{ display: 'flex', alignItems: 'center', gap: 8, background: 'rgba(255,255,255,0.05)', border: '1px solid rgba(255,255,255,0.08)', borderRadius: 20, padding: '5px 12px' }}>
-      <div style={{ display: 'flex', gap: 4, alignItems: 'center' }}>
-        {Array.from({ length: max }).map((_, i) => (
-          <div key={i} style={{
-            width: i < count ? 10 : 8, height: i < count ? 10 : 8,
-            borderRadius: '50%', background: i < count ? color : 'rgba(255,255,255,0.12)',
-            transition: 'all 0.3s', boxShadow: i < count ? `0 0 6px ${color}88` : 'none',
-          }} />
-        ))}
-      </div>
-      <span style={{ fontSize: 13, color, fontWeight: 'bold' }}>{count}</span>
-      <span style={{ fontSize: 11, color: '#64748b' }}>/ {max}</span>
-    </div>
-  )
-}
-
 // ═══════════════════════════════════════════════════════════════════════════
 // MAIN PAGE
 // ═══════════════════════════════════════════════════════════════════════════
@@ -141,7 +138,6 @@ export default function RoomPage() {
   const [roomDeleted, setRoomDeleted] = useState(false)
   const [copied, setCopied] = useState(false)
 
-  // game state
   const [gameStarted, setGameStarted] = useState(false)
   const [questions, setQuestions] = useState<Question[]>([])
   const [islamicQs, setIslamicQs] = useState<IslamicQuestion[]>([])
@@ -151,7 +147,6 @@ export default function RoomPage() {
   const [scores, setScores] = useState<Record<number, number>>({})
   const [gameFinished, setGameFinished] = useState(false)
 
-  // per-player
   const [answer, setAnswer] = useState('')
   const [result, setResult] = useState<{ text: string; ok: boolean } | null>(null)
   const [answered, setAnswered] = useState(false)
@@ -168,23 +163,42 @@ export default function RoomPage() {
   const isTicTacToe = room?.game_type === 'tic_tac_toe'
   const isHost = user?.id === room?.host_telegram_id
 
-  // Grace period state: when host goes away, countdown before room deletion
   const [hostAway, setHostAway] = useState(false)
   const [graceSeconds, setGraceSeconds] = useState(0)
-  const hostAwayRef = useRef(false)
   const graceTimerRef = useRef<ReturnType<typeof setInterval> | null>(null)
-  const GRACE_PERIOD_SECONDS = 180 // 3 minutes grace period
 
-  // ── Auto-delete room ──────────────────────────────────────────────────
+  // ── Delete room ───────────────────────────────────────────────────────
   const deleteRoom = useCallback(async () => {
     await supabase.from('room_members').delete().eq('room_id', roomId)
     await supabase.from('rooms').delete().eq('id', roomId)
     setRoomDeleted(true)
   }, [roomId])
 
+  // ── sendBeacon delete (reliable on tab/browser close) ─────────────────
+  useEffect(() => {
+    if (!isHost || !room) return
+
+    const sendBeaconDelete = () => {
+      const body = JSON.stringify({ room_id: roomId })
+      // Try sendBeacon for reliability on tab close
+      if (navigator.sendBeacon) {
+        navigator.sendBeacon('/api/rooms/delete', new Blob([body], { type: 'application/json' }))
+      }
+    }
+
+    window.addEventListener('beforeunload', sendBeaconDelete)
+    window.addEventListener('pagehide', sendBeaconDelete)
+
+    return () => {
+      window.removeEventListener('beforeunload', sendBeaconDelete)
+      window.removeEventListener('pagehide', sendBeaconDelete)
+    }
+  }, [isHost, room, roomId])
+
   // ── Leave handler ─────────────────────────────────────────────────────
   const handleLeave = useCallback(async () => {
     if (!user) return
+    // Remove beforeunload listener before programmatic navigation
     if (isHost) {
       await deleteRoom()
     } else {
@@ -193,7 +207,7 @@ export default function RoomPage() {
     router.push('/')
   }, [user, isHost, roomId, deleteRoom, router])
 
-  // ── Heartbeat: update last_seen every 30s ──────────────────────────────
+  // ── Heartbeat ─────────────────────────────────────────────────────────
   useEffect(() => {
     if (!user) return
     const beat = () => {
@@ -204,32 +218,26 @@ export default function RoomPage() {
     return () => clearInterval(id)
   }, [user])
 
-  // ── Visibility change: detect when host leaves the app ────────────────
+  // ── Visibility change: grace period ──────────────────────────────────
   useEffect(() => {
     if (!isHost || !room) return
 
     const onVisibilityChange = () => {
       if (document.visibilityState === 'hidden') {
-        // Host went away — start grace period
-        hostAwayRef.current = true
         setHostAway(true)
         setGraceSeconds(GRACE_PERIOD_SECONDS)
-
         if (graceTimerRef.current) clearInterval(graceTimerRef.current)
         graceTimerRef.current = setInterval(() => {
           setGraceSeconds(prev => {
             if (prev <= 1) {
               if (graceTimerRef.current) clearInterval(graceTimerRef.current)
-              // Grace period expired — delete the room
               deleteRoom()
               return 0
             }
             return prev - 1
           })
         }, 1000)
-      } else if (document.visibilityState === 'visible') {
-        // Host came back — cancel grace period
-        hostAwayRef.current = false
+      } else {
         setHostAway(false)
         if (graceTimerRef.current) clearInterval(graceTimerRef.current)
         setGraceSeconds(0)
@@ -243,21 +251,14 @@ export default function RoomPage() {
     }
   }, [isHost, room, deleteRoom])
 
-  // ── Detect host member leaving (via realtime) ─────────────────────────
+  // ── Detect host left via realtime ─────────────────────────────────────
   useEffect(() => {
     if (!room || !user) return
-    // If the host is no longer in the members list and the game hasn't started, delete room
     if (room.status === 'waiting' && members.length > 0) {
-      const hostStillPresent = members.some(m => m.telegram_id === room.host_telegram_id)
-      if (!hostStillPresent) {
-        // Host was removed — delete room
-        deleteRoom()
-      }
+      const hostPresent = members.some(m => m.telegram_id === room.host_telegram_id)
+      if (!hostPresent) deleteRoom()
     }
-    // If room has 0 members, delete it
-    if (members.length === 0 && room.status === 'waiting') {
-      deleteRoom()
-    }
+    if (members.length === 0 && room.status === 'waiting') deleteRoom()
   }, [members, room, user, deleteRoom])
 
   // ── Copy code ─────────────────────────────────────────────────────────
@@ -364,7 +365,7 @@ export default function RoomPage() {
     const ans = isIslamic ? currentIQ?.choices[currentIQ.correct] : currentQ?.name
     setResult({ text: `⏰ انتهى الوقت! الإجابة: ${ans}`, ok: false })
     setTimeout(() => advance(), 2200)
-  // eslint-disable-next-line react-hooks/exhaustive-deps
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [answered, isIslamic, currentIQ, currentQ])
 
   const advance = useCallback(() => {
@@ -456,10 +457,15 @@ export default function RoomPage() {
   const gameInfo = GAME_TYPES.find(g => g.id === room?.game_type)
   const sorted = [...members].sort((a, b) => (scores[b.telegram_id] || 0) - (scores[a.telegram_id] || 0))
   const totalRounds = isIslamic ? (islamicQsRef.current.length || 15) : (questionsRef.current.length || 10)
-  const hostDisplayName = room ? (members.find(m => m.telegram_id === room.host_telegram_id)?.users?.first_name || room.host_name || 'المضيف') : 'المضيف'
-  const catColors: Record<string, string> = { 'عقيدة': '#8b5cf6', 'قرآن': '#10b981', 'حديث': '#3b82f6', 'سيرة': '#f59e0b', 'فقه': '#ef4444', 'تاريخ': '#6366f1', 'أخلاق': '#ec4899' }
+  const hostDisplayName = room
+    ? (members.find(m => m.telegram_id === room.host_telegram_id)?.users?.first_name || room.host_name || 'المضيف')
+    : 'المضيف'
+  const catColors: Record<string, string> = {
+    'عقيدة': '#8b5cf6', 'قرآن': '#10b981', 'حديث': '#3b82f6',
+    'سيرة': '#f59e0b', 'فقه': '#ef4444', 'تاريخ': '#6366f1', 'أخلاق': '#ec4899'
+  }
 
-  // ── Room deleted ───────────────────────────────────────────────────────
+  // ── Room deleted ──────────────────────────────────────────────────────
   if (roomDeleted) return (
     <div style={{ minHeight: '100vh', background: '#0f172a', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', color: 'white', fontFamily: 'Segoe UI,system-ui,sans-serif', padding: 24, textAlign: 'center' }}>
       <div style={{ fontSize: 72, marginBottom: 16 }}>🚪</div>
@@ -613,34 +619,24 @@ export default function RoomPage() {
   // ══════════════════════════════════════════════════════════════════════
   return (
     <div style={{ minHeight: '100vh', background: '#0f172a', color: 'white', padding: '20px 16px 40px', fontFamily: 'Segoe UI,system-ui,sans-serif' }}>
-
-      {/* Leave button */}
       <button onClick={handleLeave}
         style={{ color: '#94a3b8', background: 'none', border: 'none', fontSize: 15, cursor: 'pointer', marginBottom: 18, display: 'flex', alignItems: 'center', gap: 6 }}>
         ← {isHost ? 'مغادرة وحذف الغرفة' : 'مغادرة الغرفة'}
       </button>
 
-      {/* Host-away grace period banner */}
+      {/* Host away grace banner */}
       {hostAway && isHost && graceSeconds > 0 && (
-        <div style={{
-          background: 'rgba(239,68,68,0.12)', border: '1px solid rgba(239,68,68,0.35)',
-          borderRadius: 16, padding: '12px 14px', marginBottom: 14,
-        }}>
+        <div style={{ background: 'rgba(239,68,68,0.12)', border: '1px solid rgba(239,68,68,0.35)', borderRadius: 16, padding: '12px 14px', marginBottom: 14 }}>
           <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: 10 }}>
             <div style={{ display: 'flex', gap: 10, alignItems: 'flex-start', flex: 1 }}>
               <span style={{ fontSize: 22, flexShrink: 0 }}>⚠️</span>
               <div>
-                <div style={{ fontWeight: 'bold', fontSize: 13, color: '#f87171', marginBottom: 3 }}>
-                  غادرت التطبيق — الغرفة ستُحذف!
-                </div>
-                <div style={{ fontSize: 12, color: '#94a3b8', lineHeight: 1.6 }}>
-                  إذا لم تعد خلال المهلة، ستُحذف الغرفة تلقائياً.
-                  ابقَ في التطبيق للاحتفاظ بالغرفة.
-                </div>
+                <div style={{ fontWeight: 'bold', fontSize: 13, color: '#f87171', marginBottom: 3 }}>غادرت التطبيق — الغرفة ستُحذف!</div>
+                <div style={{ fontSize: 12, color: '#94a3b8', lineHeight: 1.6 }}>ارجع خلال المهلة للاحتفاظ بالغرفة.</div>
               </div>
             </div>
             <div style={{ textAlign: 'center', flexShrink: 0 }}>
-              <div style={{ fontFamily: 'monospace', fontWeight: 'bold', fontSize: 22, color: '#f87171', lineHeight: 1 }}>
+              <div style={{ fontFamily: 'monospace', fontWeight: 'bold', fontSize: 22, color: '#f87171' }}>
                 {Math.floor(graceSeconds / 60)}:{(graceSeconds % 60).toString().padStart(2, '0')}
               </div>
             </div>
@@ -651,22 +647,17 @@ export default function RoomPage() {
         </div>
       )}
 
-      {/* Expiry banner — only when host is alone and room has expires_at */}
+      {/* 5-min expiry banner (only when host alone) */}
       {isHost && members.length <= 1 && room.expires_at && !hostAway && (
         <ExpiryBanner expiresAt={room.expires_at} onExpired={deleteRoom} />
       )}
 
-      {/* Room header */}
+      {/* Room header card */}
       <div style={{ background: 'linear-gradient(135deg,#312e81,#4f46e5,#7c3aed)', borderRadius: 24, padding: '22px 20px', marginBottom: 16, boxShadow: '0 8px 32px rgba(79,70,229,0.3)' }}>
         <div style={{ textAlign: 'center' }}>
           <div style={{ fontSize: 44, marginBottom: 6 }}>{gameInfo?.emoji}</div>
-          {/* Room name = "غرفة [host name]" */}
-          <h1 style={{ fontSize: 20, fontWeight: 'bold', marginBottom: 3 }}>
-            غرفة {hostDisplayName}
-          </h1>
+          <h1 style={{ fontSize: 20, fontWeight: 'bold', marginBottom: 3 }}>غرفة {hostDisplayName}</h1>
           <div style={{ color: 'rgba(255,255,255,0.65)', fontSize: 13, marginBottom: 14 }}>{gameInfo?.name}</div>
-
-          {/* Code + copy button */}
           <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 10 }}>
             <div style={{ background: 'rgba(0,0,0,0.35)', borderRadius: 14, padding: '9px 20px', fontFamily: 'monospace', fontWeight: 'bold', fontSize: 24, letterSpacing: 6, color: 'white', userSelect: 'all' }}>
               {room.code}
@@ -676,34 +667,35 @@ export default function RoomPage() {
               {copied ? '✅ تم' : '📋 نسخ'}
             </button>
           </div>
-
           <div style={{ color: 'rgba(255,255,255,0.45)', fontSize: 12, marginTop: 8 }}>
             {room.is_public ? '🌐 غرفة عامة' : '🔒 غرفة خاصة'}
           </div>
         </div>
       </div>
 
-      {/* How-to-share tip box */}
-      <div style={{ background: 'rgba(99,102,241,0.1)', border: '1px solid rgba(99,102,241,0.22)', borderRadius: 16, padding: '12px 14px', marginBottom: 16, display: 'flex', gap: 10, alignItems: 'flex-start' }}>
-        <span style={{ fontSize: 22, flexShrink: 0 }}>💡</span>
-        <div>
-          <div style={{ fontWeight: 'bold', fontSize: 13, color: '#a5b4fc', marginBottom: 5 }}>كيف تدعو صديقك؟</div>
-          <div style={{ fontSize: 12, color: '#94a3b8', lineHeight: 1.7 }}>
-            ① اضغط <strong style={{ color: 'white' }}>📋 نسخ</strong> لنسخ الكود<br />
-            ② ارجع لتيليجرام وأرسله لصديقك<br />
-            ③ اطلب منه يفتح البوت ويدخل الكود<br />
-            <span style={{ color: '#fbbf24' }}>⏳ لديك 5 دقائق قبل حذف الغرفة تلقائياً</span><br />
-            <span style={{ color: '#f87171' }}>⚠️ إذا غادرت التطبيق، لديك 3 دقائق للعودة قبل حذف الغرفة</span>
+      {/* How-to-share tip */}
+      <div style={{ background: 'rgba(99,102,241,0.1)', border: '1px solid rgba(99,102,241,0.22)', borderRadius: 16, padding: '12px 14px', marginBottom: 16 }}>
+        <div style={{ display: 'flex', gap: 10, alignItems: 'flex-start' }}>
+          <span style={{ fontSize: 20, flexShrink: 0 }}>💡</span>
+          <div>
+            <div style={{ fontWeight: 'bold', fontSize: 13, color: '#a5b4fc', marginBottom: 5 }}>كيف تدعو صديقك؟</div>
+            <div style={{ fontSize: 12, color: '#94a3b8', lineHeight: 1.75 }}>
+              ① اضغط <strong style={{ color: 'white' }}>📋 نسخ</strong> لنسخ الكود<br />
+              ② ارجع لتيليجرام وأرسله لصديقك<br />
+              ③ اطلب منه يفتح البوت ويدخل الكود<br />
+              <span style={{ color: '#fbbf24' }}>⏳ لديك 5 دقائق قبل حذف الغرفة تلقائياً</span><br />
+              <span style={{ color: '#f87171' }}>⚠️ إذا أغلقت التطبيق تماماً، تُحذف الغرفة فوراً</span>
+            </div>
           </div>
         </div>
       </div>
 
-      {/* Grace period explanation for non-host users */}
+      {/* Non-host info */}
       {!isHost && (
         <div style={{ background: 'rgba(245,158,11,0.08)', border: '1px solid rgba(245,158,11,0.2)', borderRadius: 14, padding: '10px 14px', marginBottom: 16 }}>
           <div style={{ fontSize: 12, color: '#94a3b8', lineHeight: 1.6, display: 'flex', gap: 8, alignItems: 'flex-start' }}>
             <span style={{ fontSize: 16, flexShrink: 0 }}>ℹ️</span>
-            <span>إذا غادر <strong style={{ color: '#fbbf24' }}>صاحب الغرفة</strong> التطبيق، سيكون لديه 3 دقائق للعودة. إذا لم يعد، ستُحذف الغرفة تلقائياً.</span>
+            <span>إذا غادر <strong style={{ color: '#fbbf24' }}>صاحب الغرفة</strong> أو أغلق التطبيق، ستُحذف الغرفة تلقائياً.</span>
           </div>
         </div>
       )}
@@ -711,7 +703,7 @@ export default function RoomPage() {
       {/* Members section */}
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 }}>
         <span style={{ fontWeight: '600', fontSize: 14, color: '#cbd5e1' }}>اللاعبون في الغرفة</span>
-        <MemberCountBadge count={members.length} max={room.max_players} />
+        <MemberDots count={members.length} max={room.max_players} />
       </div>
 
       {/* Real members */}

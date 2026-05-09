@@ -1,5 +1,5 @@
 'use client'
-import { useEffect, useState } from 'react'
+import { useEffect, useState, useCallback } from 'react'
 import { useTelegram } from '@/lib/useTelegram'
 import { supabase } from '@/lib/supabase'
 import { GAME_TYPES } from '@/lib/gameData'
@@ -7,7 +7,62 @@ import Link from 'next/link'
 
 interface UserStats { total_score: number; games_played: number; games_won: number }
 interface LeaderboardEntry { telegram_id: number; username: string; first_name: string; total_score: number; games_played: number; rank: number }
-interface Room { id: string; code: string; game_type: string; status: string; is_public: boolean; host_telegram_id: number; host_name?: string; expires_at?: string; room_members?: unknown[] }
+interface Room {
+  id: string; code: string; game_type: string; status: string
+  is_public: boolean; host_telegram_id: number; host_name?: string
+  expires_at?: string; created_at?: string
+  room_members?: { telegram_id: number }[]
+  users?: { first_name?: string; username?: string } | null
+}
+
+// ── Live member count dot indicator ──
+function MemberDots({ count, max }: { count: number; max: number }) {
+  const color = count >= max ? '#4ade80' : count > 1 ? '#fbbf24' : '#94a3b8'
+  return (
+    <div style={{ display: 'flex', gap: 3, alignItems: 'center' }}>
+      {Array.from({ length: Math.min(max, 8) }).map((_, i) => (
+        <div key={i} style={{
+          width: i < count ? 9 : 7, height: i < count ? 9 : 7,
+          borderRadius: '50%',
+          background: i < count ? color : 'rgba(255,255,255,0.12)',
+          boxShadow: i < count ? `0 0 5px ${color}88` : 'none',
+          transition: 'all 0.3s',
+          flexShrink: 0,
+        }} />
+      ))}
+    </div>
+  )
+}
+
+// ── Grace period countdown badge ──
+function GraceBadge({ expiresAt }: { expiresAt: string }) {
+  const [secs, setSecs] = useState(0)
+  useEffect(() => {
+    const tick = () => {
+      const diff = Math.max(0, Math.floor((new Date(expiresAt).getTime() - Date.now()) / 1000))
+      setSecs(diff)
+    }
+    tick()
+    const id = setInterval(tick, 1000)
+    return () => clearInterval(id)
+  }, [expiresAt])
+  if (secs <= 0) return null
+  const mins = Math.floor(secs / 60)
+  const s = secs % 60
+  const urgent = secs <= 60
+  return (
+    <div style={{
+      background: urgent ? 'rgba(239,68,68,0.15)' : 'rgba(245,158,11,0.12)',
+      border: `1px solid ${urgent ? 'rgba(239,68,68,0.4)' : 'rgba(245,158,11,0.3)'}`,
+      borderRadius: 10, padding: '2px 8px',
+      fontSize: 11, fontFamily: 'monospace',
+      color: urgent ? '#f87171' : '#fbbf24',
+      fontWeight: 'bold', whiteSpace: 'nowrap',
+    }}>
+      ⏳ {mins}:{s.toString().padStart(2, '0')}
+    </div>
+  )
+}
 
 export default function Home() {
   const { user, isReady } = useTelegram()
@@ -16,6 +71,32 @@ export default function Home() {
   const [leaderboard, setLeaderboard] = useState<LeaderboardEntry[]>([])
   const [onlineCount, setOnlineCount] = useState(0)
   const [rooms, setRooms] = useState<Room[]>([])
+  // Per-room member counts (updated live)
+  const [roomMemberCounts, setRoomMemberCounts] = useState<Record<string, number>>({})
+
+  const fetchPublicRooms = useCallback(async () => {
+    const { data } = await supabase
+      .from('rooms')
+      .select('*, room_members(telegram_id), users!rooms_host_telegram_id_fkey(first_name, username)')
+      .eq('is_public', true)
+      .eq('status', 'waiting')
+      .order('created_at', { ascending: false })
+      .limit(20)
+
+    if (data) {
+      const validRooms = data.filter(room => {
+        const memberCount = (room.room_members as { telegram_id: number }[])?.length || 0
+        return memberCount > 0
+      })
+      setRooms(validRooms)
+      // Build member count map
+      const counts: Record<string, number> = {}
+      validRooms.forEach(r => {
+        counts[r.id] = (r.room_members as { telegram_id: number }[])?.length || 0
+      })
+      setRoomMemberCounts(counts)
+    }
+  }, [])
 
   useEffect(() => {
     if (!isReady || !user) return
@@ -31,27 +112,40 @@ export default function Home() {
     return () => clearInterval(interval)
   }, [])
 
-  // Realtime rooms subscription + periodic refresh
+  // Realtime rooms + members subscription
   useEffect(() => {
-    // Subscribe to rooms table changes
     const channel = supabase
       .channel('public_rooms_watch')
       .on('postgres_changes', { event: '*', schema: 'public', table: 'rooms' }, () => {
         fetchPublicRooms()
       })
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'room_members' }, () => {
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'room_members' }, async (payload) => {
+        // Fast update: just re-fetch member counts for existing rooms
         fetchPublicRooms()
+
+        // If someone left (DELETE), check if room should be removed
+        if (payload.eventType === 'DELETE') {
+          const roomId = (payload.old as { room_id?: string })?.room_id
+          if (roomId) {
+            const { count } = await supabase
+              .from('room_members')
+              .select('*', { count: 'exact', head: true })
+              .eq('room_id', roomId)
+            if (count === 0) {
+              setRooms(prev => prev.filter(r => r.id !== roomId))
+              setRoomMemberCounts(prev => { const n = { ...prev }; delete n[roomId]; return n })
+            }
+          }
+        }
       })
       .subscribe()
 
-    // Also refresh every 15 seconds as a safety net
-    const interval = setInterval(fetchPublicRooms, 15000)
-
+    const interval = setInterval(fetchPublicRooms, 10000)
     return () => {
       supabase.removeChannel(channel)
       clearInterval(interval)
     }
-  }, [])
+  }, [fetchPublicRooms])
 
   async function registerUser() {
     if (!user) return
@@ -77,25 +171,6 @@ export default function Home() {
     setOnlineCount(count || 0)
   }
 
-  async function fetchPublicRooms() {
-    const { data } = await supabase
-      .from('rooms')
-      .select('*, room_members(telegram_id)')
-      .eq('is_public', true)
-      .eq('status', 'waiting')
-      .order('created_at', { ascending: false })
-      .limit(20)
-
-    if (data) {
-      // Filter out rooms with 0 members (orphaned/empty rooms)
-      const validRooms = data.filter(room => {
-        const memberCount = (room.room_members as unknown[])?.length || 0
-        return memberCount > 0
-      })
-      setRooms(validRooms)
-    }
-  }
-
   if (!isReady) return (
     <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', minHeight: '100vh', background: '#0f172a', flexDirection: 'column', gap: 12 }}>
       <div style={{ fontSize: 56 }}>🎮</div>
@@ -110,12 +185,9 @@ export default function Home() {
       gap: 16, padding: 24, textAlign: "center", fontFamily: "Segoe UI, system-ui, sans-serif"
     }}>
       <div style={{ fontSize: 64 }}>🎮</div>
-      <div style={{ color: "white", fontSize: 20, fontWeight: "bold" }}>
-        افتح اللعبة من تيليجرام!
-      </div>
+      <div style={{ color: "white", fontSize: 20, fontWeight: "bold" }}>افتح اللعبة من تيليجرام!</div>
       <div style={{ color: "#94a3b8", fontSize: 14, lineHeight: 1.6 }}>
-        اللعبة بتشتغل جوه تيليجرام فقط.<br />
-        افتح البوت وابدأ اللعب من هناك 👇
+        اللعبة بتشتغل جوه تيليجرام فقط.<br />افتح البوت وابدأ اللعب من هناك 👇
       </div>
     </div>
   )
@@ -143,8 +215,6 @@ export default function Home() {
             </div>
           </div>
         </div>
-
-        {/* Stats */}
         <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 10 }}>
           {[
             { label: 'النقاط', value: stats.total_score, icon: '⭐' },
@@ -201,78 +271,146 @@ export default function Home() {
       {/* ROOMS TAB */}
       {activeTab === 'rooms' && (
         <div style={{ padding: '0 16px' }}>
-          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12, marginBottom: 20 }}>
+          {/* Action buttons */}
+          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12, marginBottom: 16 }}>
             <Link href="/rooms/create" style={{ textDecoration: 'none' }}>
               <div style={{ background: 'linear-gradient(135deg,#4f46e5,#7c3aed)', borderRadius: 20, padding: 16, height: 110, display: 'flex', flexDirection: 'column', justifyContent: 'space-between', cursor: 'pointer' }} className="game-card">
                 <div style={{ fontSize: 32 }}>➕</div>
-                <div style={{ fontWeight: 'bold', fontSize: 13 }}>إنشاء غرفة</div>
+                <div>
+                  <div style={{ fontWeight: 'bold', fontSize: 13 }}>إنشاء غرفة</div>
+                  <div style={{ color: 'rgba(255,255,255,0.6)', fontSize: 10, marginTop: 2 }}>عامة أو خاصة</div>
+                </div>
               </div>
             </Link>
             <Link href="/rooms/join" style={{ textDecoration: 'none' }}>
               <div style={{ background: 'linear-gradient(135deg,#7c3aed,#db2777)', borderRadius: 20, padding: 16, height: 110, display: 'flex', flexDirection: 'column', justifyContent: 'space-between', cursor: 'pointer' }} className="game-card">
                 <div style={{ fontSize: 32 }}>🔑</div>
-                <div style={{ fontWeight: 'bold', fontSize: 13 }}>دخول بكود</div>
+                <div>
+                  <div style={{ fontWeight: 'bold', fontSize: 13 }}>دخول بكود</div>
+                  <div style={{ color: 'rgba(255,255,255,0.6)', fontSize: 10, marginTop: 2 }}>ادخل كود صديقك</div>
+                </div>
               </div>
             </Link>
           </div>
 
-          {/* Grace period explanation banner */}
-          <div style={{ background: 'rgba(99,102,241,0.1)', border: '1px solid rgba(99,102,241,0.22)', borderRadius: 16, padding: '12px 14px', marginBottom: 16, display: 'flex', gap: 10, alignItems: 'flex-start' }}>
-            <span style={{ fontSize: 22, flexShrink: 0 }}>💡</span>
-            <div>
-              <div style={{ fontWeight: 'bold', fontSize: 13, color: '#a5b4fc', marginBottom: 4 }}>كيف تعمل الغرف؟</div>
-              <div style={{ fontSize: 11, color: '#94a3b8', lineHeight: 1.7 }}>
-                عند إنشاء غرفة، لديك <strong style={{ color: '#fbbf24' }}>5 دقائق</strong> لمشاركة الكود مع أصدقائك قبل أن تُحذف تلقائياً.
-                إذا غادر صاحب الغرفة، تُحذف الغرفة فوراً. الغرف الفارغة لا تظهر هنا.
+          {/* Info banner: grace period explanation */}
+          <div style={{ background: 'rgba(99,102,241,0.08)', border: '1px solid rgba(99,102,241,0.2)', borderRadius: 16, padding: '12px 14px', marginBottom: 16 }}>
+            <div style={{ display: 'flex', gap: 10, alignItems: 'flex-start' }}>
+              <span style={{ fontSize: 20, flexShrink: 0 }}>💡</span>
+              <div>
+                <div style={{ fontWeight: 'bold', fontSize: 13, color: '#a5b4fc', marginBottom: 4 }}>كيف تعمل الغرف؟</div>
+                <div style={{ fontSize: 11, color: '#94a3b8', lineHeight: 1.75 }}>
+                  ✅ <strong style={{ color: '#e2e8f0' }}>عند إنشاء غرفة</strong> — لديك <strong style={{ color: '#fbbf24' }}>5 دقائق</strong> لمشاركة الكود قبل أن تُحذف تلقائياً.<br />
+                  ⚠️ <strong style={{ color: '#e2e8f0' }}>إذا غادرت التطبيق</strong> — الغرفة تظل محجوزة <strong style={{ color: '#fb923c' }}>3 دقائق</strong> ثم تُحذف إن لم تعُد.<br />
+                  🚪 <strong style={{ color: '#e2e8f0' }}>إذا خرجت نهائياً</strong> — تُحذف الغرفة فوراً وتختفي من القائمة.
+                </div>
               </div>
             </div>
           </div>
 
-          <div style={{ color: '#94a3b8', fontSize: 13, marginBottom: 12, fontWeight: '600' }}>🌐 الغرف العامة المتاحة ({rooms.length})</div>
+          {/* Live rooms list */}
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 12 }}>
+            <span style={{ fontWeight: '600', fontSize: 14, color: '#cbd5e1' }}>
+              🌐 الغرف العامة المتاحة
+            </span>
+            <span style={{ background: rooms.length > 0 ? 'rgba(99,102,241,0.2)' : 'rgba(255,255,255,0.06)', color: rooms.length > 0 ? '#a5b4fc' : '#64748b', fontSize: 12, fontWeight: 'bold', padding: '3px 10px', borderRadius: 20, border: '1px solid rgba(99,102,241,0.2)' }}>
+              {rooms.length} غرفة
+            </span>
+          </div>
+
           {rooms.length === 0 ? (
-            <div style={{ textAlign: 'center', padding: '32px 0', color: '#475569' }}>
-              <div style={{ fontSize: 40, marginBottom: 8 }}>🚪</div>
-              <div style={{ fontSize: 13 }}>لا توجد غرف الآن — كن أول من ينشئ واحدة!</div>
+            <div style={{ textAlign: 'center', padding: '40px 0', color: '#475569' }}>
+              <div style={{ fontSize: 48, marginBottom: 10 }}>🚪</div>
+              <div style={{ fontSize: 14, marginBottom: 6 }}>لا توجد غرف متاحة الآن</div>
+              <div style={{ fontSize: 12, color: '#334155' }}>كن أول من ينشئ غرفة وادعُ أصدقاءك!</div>
             </div>
-          ) : rooms.map(room => {
-            const game = GAME_TYPES.find(g => g.id === room.game_type)
-            const memberCount = (room.room_members as unknown[])?.length || 0
-            const hostName = room.host_name || 'مضيف'
-            return (
-              <Link key={room.id} href={`/rooms/${room.id}`} style={{ textDecoration: 'none' }}>
-                <div style={{
-                  background: 'rgba(255,255,255,0.06)', borderRadius: 14, padding: '14px 14px', marginBottom: 8,
-                  display: 'flex', alignItems: 'center', gap: 12, cursor: 'pointer',
-                  border: '1px solid rgba(255,255,255,0.06)', transition: 'all 0.2s'
-                }}>
-                  <div style={{
-                    width: 48, height: 48, borderRadius: 14, display: 'flex', alignItems: 'center', justifyContent: 'center',
-                    background: `linear-gradient(135deg, ${game?.id === 'islamic' ? '#059669, #0d9488' : game?.id === 'tic_tac_toe' ? '#9333ea, #db2777' : '#4f46e5, #7c3aed'})`,
-                    fontSize: 24, flexShrink: 0
-                  }}>
-                    {game?.emoji || '🎮'}
-                  </div>
-                  <div style={{ flex: 1, minWidth: 0 }}>
-                    <div style={{ fontWeight: '600', fontSize: 13, marginBottom: 3 }}>{game?.name || 'لعبة'}</div>
-                    <div style={{ color: '#94a3b8', fontSize: 11, display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
-                      <span style={{ display: 'flex', alignItems: 'center', gap: 3 }}>👑 {hostName}</span>
-                      <span style={{ color: '#475569' }}>•</span>
-                      <span style={{ display: 'flex', alignItems: 'center', gap: 3 }}>👥 {memberCount}/{game?.maxPlayers || 8}</span>
-                      <span style={{ color: '#475569' }}>•</span>
-                      <span style={{ fontFamily: 'monospace', color: '#a5b4fc', letterSpacing: 1 }}>{room.code}</span>
+          ) : (
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+              {rooms.map(room => {
+                const game = GAME_TYPES.find(g => g.id === room.game_type)
+                const memberCount = roomMemberCounts[room.id] ?? ((room.room_members as { telegram_id: number }[])?.length || 0)
+                const maxPlayers = game?.maxPlayers || 8
+                const isFull = memberCount >= maxPlayers
+                // Host name: from joined users table or host_name field
+                const hostName = (room.users as { first_name?: string; username?: string } | null)?.first_name
+                  || (room.users as { first_name?: string; username?: string } | null)?.username
+                  || room.host_name
+                  || 'مضيف'
+                // Game gradient color
+                const gradientMap: Record<string, string> = {
+                  logo_guess: '#9333ea, #db2777', car_logo: '#2563eb, #0891b2',
+                  brand_logo: '#ea580c, #dc2626', phone_guess: '#16a34a, #0d9488',
+                  tic_tac_toe: '#ca8a04, #ea580c', snake: '#059669, #16a34a',
+                  islamic: '#0f766e, #047857',
+                }
+                const grad = gradientMap[room.game_type] || '#4f46e5, #7c3aed'
+
+                return (
+                  <Link key={room.id} href={`/rooms/${room.id}`} style={{ textDecoration: 'none' }}>
+                    <div style={{
+                      background: 'rgba(255,255,255,0.05)',
+                      border: `1px solid ${isFull ? 'rgba(239,68,68,0.25)' : 'rgba(255,255,255,0.08)'}`,
+                      borderRadius: 18, padding: '14px 14px', cursor: 'pointer',
+                      transition: 'all 0.2s',
+                    }}>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+                        {/* Game icon */}
+                        <div style={{
+                          width: 52, height: 52, borderRadius: 14, flexShrink: 0,
+                          background: `linear-gradient(135deg, ${grad})`,
+                          display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 26,
+                        }}>
+                          {game?.emoji || '🎮'}
+                        </div>
+
+                        {/* Info */}
+                        <div style={{ flex: 1, minWidth: 0 }}>
+                          {/* Top row: game name + code */}
+                          <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 5 }}>
+                            <span style={{ fontWeight: '700', fontSize: 14, color: 'white' }}>
+                              {game?.name || 'لعبة'}
+                            </span>
+                            <span style={{ fontFamily: 'monospace', fontSize: 12, color: '#818cf8', background: 'rgba(99,102,241,0.15)', padding: '1px 7px', borderRadius: 6, letterSpacing: 1 }}>
+                              {room.code}
+                            </span>
+                          </div>
+
+                          {/* Host row */}
+                          <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 7 }}>
+                            <span style={{ fontSize: 14 }}>👑</span>
+                            <span style={{ color: '#94a3b8', fontSize: 12 }}>{hostName}</span>
+                          </div>
+
+                          {/* Member count dots + numbers */}
+                          <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                            <MemberDots count={memberCount} max={maxPlayers} />
+                            <span style={{ fontSize: 12, color: isFull ? '#f87171' : memberCount > 1 ? '#fbbf24' : '#94a3b8', fontWeight: '600' }}>
+                              {memberCount}/{maxPlayers} لاعب
+                            </span>
+                          </div>
+                        </div>
+
+                        {/* Right side: status + timer */}
+                        <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: 6, flexShrink: 0 }}>
+                          <div style={{
+                            background: isFull ? 'rgba(239,68,68,0.15)' : memberCount > 1 ? 'rgba(234,179,8,0.15)' : 'rgba(34,197,94,0.15)',
+                            color: isFull ? '#f87171' : memberCount > 1 ? '#fbbf24' : '#4ade80',
+                            border: `1px solid ${isFull ? 'rgba(239,68,68,0.3)' : memberCount > 1 ? 'rgba(234,179,8,0.3)' : 'rgba(34,197,94,0.3)'}`,
+                            borderRadius: 20, padding: '4px 10px', fontSize: 11, fontWeight: 'bold',
+                          }}>
+                            {isFull ? '🔴 ممتلئة' : memberCount > 1 ? '🟡 جاهزة' : '🟢 انضم'}
+                          </div>
+                          {room.expires_at && (
+                            <GraceBadge expiresAt={room.expires_at} />
+                          )}
+                        </div>
+                      </div>
                     </div>
-                  </div>
-                  <div style={{
-                    background: memberCount > 1 ? 'rgba(34,197,94,0.2)' : 'rgba(234,179,8,0.15)',
-                    color: memberCount > 1 ? '#4ade80' : '#fbbf24',
-                    fontSize: 11, padding: '5px 12px', borderRadius: 20, fontWeight: 'bold', whiteSpace: 'nowrap'
-                  }}>
-                    {memberCount > 1 ? 'انضم' : 'انتظار'}
-                  </div>
-                </div>
-              </Link>
-            )
-          })}
+                  </Link>
+                )
+              })}
+            </div>
+          )}
         </div>
       )}
 
@@ -318,9 +456,7 @@ function ProfileTab({ user, stats, leaderboard }: { user: { id: number; first_na
 
   return (
     <div style={{ padding: '0 16px' }}>
-      {/* Profile Card */}
       <div style={{ background: 'linear-gradient(135deg, rgba(79,70,229,0.3), rgba(139,92,246,0.3))', border: '1px solid rgba(99,102,241,0.3)', borderRadius: 24, padding: 24, marginBottom: 20, textAlign: 'center' }}>
-        {/* Avatar */}
         {user?.photo_url ? (
           <div style={{ position: 'relative', display: 'inline-block', marginBottom: 12 }}>
             <img src={user.photo_url} alt="avatar" style={{ width: 80, height: 80, borderRadius: '50%', border: '3px solid #6366f1', objectFit: 'cover' }} onError={e => { (e.target as HTMLImageElement).style.display = 'none' }} />
@@ -330,27 +466,19 @@ function ProfileTab({ user, stats, leaderboard }: { user: { id: number; first_na
             {user?.first_name?.[0] || '?'}
           </div>
         )}
-
-        {/* Name - handles decorative Unicode */}
         <div style={{ fontSize: 20, fontWeight: 'bold', marginBottom: 4, unicodeBidi: 'plaintext', direction: 'ltr', textAlign: 'center' }}>
           {user?.first_name} {user?.last_name}
         </div>
         <div style={{ color: '#94a3b8', fontSize: 14, marginBottom: 16 }}>@{user?.username || 'لاعب'}</div>
-
-        {/* Rank Badge */}
         {rank > 0 && (
           <div style={{ display: 'inline-block', background: 'rgba(234,179,8,0.2)', border: '1px solid rgba(234,179,8,0.4)', borderRadius: 20, padding: '6px 16px', fontSize: 14, color: '#fbbf24', fontWeight: 'bold', marginBottom: 16 }}>
             🏆 المركز #{rank} عالمياً
           </div>
         )}
-
-        {/* Telegram Note */}
         <div style={{ background: 'rgba(255,255,255,0.05)', borderRadius: 12, padding: '8px 12px', fontSize: 11, color: '#64748b' }}>
           💡 لتغيير صورتك البروفايل أو اسمك، غيّرها في تيليجرام وستُحدَّث هنا
         </div>
       </div>
-
-      {/* Stats Grid */}
       <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12, marginBottom: 20 }}>
         {[
           { label: 'إجمالي النقاط', value: stats.total_score, icon: '⭐', color: '#fbbf24' },
@@ -365,8 +493,6 @@ function ProfileTab({ user, stats, leaderboard }: { user: { id: number; first_na
           </div>
         ))}
       </div>
-
-      {/* Achievements */}
       <div style={{ background: 'rgba(255,255,255,0.05)', borderRadius: 16, padding: 16 }}>
         <div style={{ fontWeight: '600', marginBottom: 12, color: '#cbd5e1' }}>🎖️ الإنجازات</div>
         {[
